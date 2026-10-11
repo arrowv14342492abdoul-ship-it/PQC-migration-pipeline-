@@ -1,0 +1,6 @@
+{
+  "name": "PQC Migration Pipeline",
+  "description": "Multi-agent Post-Quantum Cryptography transition engine featuring automated CBOM auditing, NIST FIPS 203/204 hybrid architecture design, and liboqs integration code generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
