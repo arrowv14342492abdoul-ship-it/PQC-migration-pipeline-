@@ -125,21 +125,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </div>
 
           {/* Model & Determinism notice */}
-          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-950 space-y-1.5">
-            <div className="font-semibold text-zinc-300 flex items-center gap-1.5">
-              <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Orchestration Pipeline Parameters</span>
+          <div className="p-3 rounded-lg border border-zinc-800 bg-zinc-950 space-y-2">
+            <div className="font-semibold text-zinc-300 flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Orchestration Parameters & Quotas</span>
+              </span>
+              <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 border border-emerald-800/80 px-1.5 py-0.2 rounded">
+                High-Assurance Safe
+              </span>
             </div>
             <div className="flex items-center justify-between text-zinc-400 text-[11px] font-mono">
               <span>Agent Temperature:</span>
               <span className="text-emerald-400 font-semibold">0.0 (Deterministic)</span>
             </div>
             <div className="flex items-center justify-between text-zinc-400 text-[11px] font-mono">
-              <span>AI Engine:</span>
+              <span>Primary Engine:</span>
               <span className="text-zinc-200">{options.model}</span>
             </div>
-            <p className="text-[11px] text-zinc-500">
-              All 3 agents operate at zero temperature to guarantee reproducible, rigorous cryptographic transformations and avoid hallucinated parameters.
+            <div className="flex items-center justify-between text-zinc-400 text-[11px] font-mono">
+              <span>Rate Limit (429) Handling:</span>
+              <span className="text-emerald-400 font-medium">Automatic Zero-Downtime Fallback</span>
+            </div>
+            <p className="text-[11px] text-zinc-500 leading-relaxed border-t border-zinc-850 pt-2">
+              If the Gemini free-tier daily quota (20 req/day) is reached, the platform automatically synthesizes full CBOM audits and liboqs implementations using the built-in deterministic cryptographic engine. You can also attach your own project API key in the AI Studio <strong>Settings &gt; Secrets</strong> panel.
             </p>
           </div>
         </div>

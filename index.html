@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>PQC Migration Pipeline</title>
     <meta name="description" content="Multi-agent Post-Quantum Cryptography transition engine featuring automated CBOM auditing, NIST FIPS 203/204 hybrid architecture design, and liboqs integration code generation." />
     <meta property="og:title" content="PQC Migration Pipeline" />
@@ -14,6 +14,99 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   </head>
   <body>
+    <script>
+      // Gracefully handle Vite dev client WebSocket connections and disconnections in cloud preview iframe
+      (function () {
+        var OriginalWebSocket = window.WebSocket;
+        if (typeof OriginalWebSocket !== 'undefined') {
+          class MockViteWS extends EventTarget {
+            constructor(url, protocols) {
+              super();
+              this.url = url;
+              this.protocol = Array.isArray(protocols) ? protocols[0] : (protocols || '');
+              this.readyState = 1; // OPEN
+              this.CONNECTING = 0;
+              this.OPEN = 1;
+              this.CLOSING = 2;
+              this.CLOSED = 3;
+              this.bufferedAmount = 0;
+              this.extensions = '';
+              this.binaryType = 'blob';
+              setTimeout(() => {
+                this.dispatchEvent(new Event('open'));
+              }, 0);
+            }
+            send() {}
+            close() {
+              this.readyState = 3; // CLOSED
+              this.dispatchEvent(new Event('close'));
+            }
+          }
+
+          window.WebSocket = function (url, protocols) {
+            var protoStr = Array.isArray(protocols) ? protocols.join(',') : (protocols || '');
+            if (
+              protoStr === 'vite-hmr' ||
+              protoStr === 'vite-ping' ||
+              (typeof url === 'string' && (url.includes('vite-hmr') || url.includes('token=')))
+            ) {
+              return new MockViteWS(url, protocols);
+            }
+            return new OriginalWebSocket(url, protocols);
+          };
+          window.WebSocket.prototype = OriginalWebSocket.prototype;
+          window.WebSocket.CONNECTING = 0;
+          window.WebSocket.OPEN = 1;
+          window.WebSocket.CLOSING = 2;
+          window.WebSocket.CLOSED = 3;
+        }
+
+        function isViteWsError(err, msg, src) {
+          var str =
+            (msg || '') +
+            ' ' +
+            (src || '') +
+            ' ' +
+            (err && (err.message || err.stack || String(err)) || '');
+          return (
+            str.indexOf('WebSocket') !== -1 ||
+            str.indexOf('@vite/client') !== -1 ||
+            str.indexOf('vite:ws') !== -1
+          );
+        }
+
+        window.addEventListener(
+          'unhandledrejection',
+          function (e) {
+            if (isViteWsError(e.reason, e.reason && e.reason.message)) {
+              e.preventDefault();
+              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+            }
+          },
+          true
+        );
+
+        window.addEventListener(
+          'error',
+          function (e) {
+            if (isViteWsError(e.error, e.message, e.filename)) {
+              e.preventDefault();
+              if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+              return true;
+            }
+          },
+          true
+        );
+
+        var origOnError = window.onerror;
+        window.onerror = function (msg, url, line, col, err) {
+          if (isViteWsError(err, msg, url)) {
+            return true;
+          }
+          if (origOnError) return origOnError.apply(this, arguments);
+        };
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
