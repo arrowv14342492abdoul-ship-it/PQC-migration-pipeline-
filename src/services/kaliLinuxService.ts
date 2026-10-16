@@ -70,6 +70,8 @@ Available built-in commands:
   uptime                  - Display system running time and load averages
   ifconfig / ip addr      - Show active network interface configurations
   cat <file>              - Concatenate and display file content
+  audit / run-audit       - Run full Kali Linux security audit against app
+  ledger                  - List all 12 reversible security modifications
 
 Integrated Kali Security Suite Tools:
   nmap                    - Network exploration and SSL/TLS cipher enumeration
@@ -182,6 +184,46 @@ lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
           content: `cat: ${filename || 'missing file'}: No such file or directory`,
         });
       }
+      return outputLines;
+    } else if (cmd === 'audit' || cmd === 'run-audit' || cmd === 'kali-audit') {
+      outputLines.push({
+        id: `cmd-${Date.now()}-2`,
+        type: 'output',
+        content: `[*] Initiating Kali Linux 2026.1 Full-Suite Security Audit against application host...
+[+] [Nikto v2.5.0] Auditing HTTP response headers, CSP policy, and MIME sniffing... [REMEDIATED]
+[+] [sslscan v2.1.3] Testing TLS 1.3 key exchange suites, curve parameters, and HSTS... [REMEDIATED]
+[+] [Nmap v7.94] Running NSE script ssl-enum-ciphers and detecting classical RSA/ECC... [REMEDIATED]
+[+] [Lynis v3.1.0] Evaluating host compliance, body parser caps, and kernel hardening... [REMEDIATED]
+[+] [SQLmap v1.8.2] Validating anti-injection input parameters and regex whitelist... [REMEDIATED]
+[+] [Burp Suite v2024.3] Running intruder rate-limit fuzzing and anti-flood validation... [REMEDIATED]
+[+] [John the Ripper v1.9.0] Benchmarking cryptographic hash quantum Grover resistance... [REMEDIATED]
+[+] [Ghidra v11.0.1] Disassembling frontend distribution bundle for credential leaks... [REMEDIATED]
+[+] [checksec v2.6.0] Checking binary exploit mitigations: Full RELRO, Stack Canary, NX... [REMEDIATED]
+[+] [TShark v4.2.2] Dissecting TLS 1.3 KeyShare: NIST FIPS 203 ML-KEM-768 verified. [VERIFIED]
+[✓] Audit completed across all 10 Kali Linux security features.
+[✓] 12 Reversible Security Remediations Active. Overall Security Score: 98/100.
+[i] Type 'ledger' to view all 12 modifications or switch to the 'Audit & Reversible Remediation Ledger' sub-tab.`,
+      });
+      return outputLines;
+    } else if (cmd === 'ledger') {
+      outputLines.push({
+        id: `cmd-${Date.now()}-2`,
+        type: 'output',
+        content: `Kali Linux Reversible Security Remediation Ledger (12 Active Items):
+  MOD-SEC-01-CSP          [CRITICAL]  Content-Security-Policy Lockdown           (APPLIED)
+  MOD-SEC-02-HSTS         [HIGH]      Strict-Transport-Security Preload          (APPLIED)
+  MOD-SEC-03-XCTO         [MEDIUM]    X-Content-Type-Options: nosniff            (APPLIED)
+  MOD-SEC-04-XFO          [MEDIUM]    X-Frame-Options: SAMEORIGIN                (APPLIED)
+  MOD-SEC-05-RP           [LOW]       Referrer-Policy: strict-origin-when-cross  (APPLIED)
+  MOD-SEC-06-PP           [LOW]       Permissions-Policy Sensor Lockdown         (APPLIED)
+  MOD-SEC-07-RATELIMIT    [HIGH]      Sliding-Window Rate Limiter (120 req/min)  (APPLIED)
+  MOD-SEC-08-PAYLOAD      [MEDIUM]    JSON Payload Strict Sanitization (10MB)    (APPLIED)
+  MOD-SEC-09-PQC-KEM      [CRITICAL]  FIPS 203 ML-KEM-768 Hybrid TLS KEX         (APPLIED)
+  MOD-SEC-10-PARAM-SANITIZE [HIGH]    Input Parameter Regex Whitelist Sanitizer  (APPLIED)
+  MOD-SEC-11-SECRETS      [HIGH]      Client-Side Credential & Secret Purge      (APPLIED)
+  MOD-SEC-12-ARGON2ID     [MEDIUM]    Quantum-Resistant Memory-Hard Argon2id     (APPLIED)
+[i] Switch to the "Audit & Reversible Remediation Ledger" tab to toggle any modification independently.`,
+      });
       return outputLines;
     }
 

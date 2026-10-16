@@ -1,4 +1,4 @@
-import { QuantumThreatModelResult, QuantumAttackVector, ThreatModelRequestOptions } from '../types/threatModel.js';
+import type { QuantumThreatModelResult, QuantumAttackVector, ThreatModelRequestOptions } from '../types/threatModel.ts';
 
 export function generateOfflineThreatModel(
   sourceCode: string,

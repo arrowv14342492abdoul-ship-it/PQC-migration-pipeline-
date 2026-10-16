@@ -25,6 +25,19 @@ import {
   Compass,
   ArrowRight,
   Code2,
+  RotateCw,
+  Undo2,
+  RefreshCw,
+  FileCode2,
+  History,
+  Sparkles,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronUp,
+  CheckCircle2,
+  Bug,
+  Info,
+  ShieldX,
 } from 'lucide-react';
 import {
   KaliTool,
@@ -39,7 +52,16 @@ import {
   KALI_TOOL_SUITE,
   KALI_AUDIT_SCENARIOS,
 } from '../../data/kaliLinuxData';
+import {
+  SecurityModification,
+  KaliAuditSummary,
+} from '../../types/kaliAuditLedger';
+import {
+  INITIAL_SECURITY_MODIFICATIONS,
+  INITIAL_KALI_AUDIT_SUMMARY,
+} from '../../data/kaliAuditLedgerData';
 import { kaliLinuxService } from '../../services/kaliLinuxService';
+import { kaliAuditService } from '../../services/kaliAuditService';
 
 interface KaliLinuxTabProps {
   onLoadCodeToPipeline?: (code: string) => void;
@@ -49,8 +71,34 @@ export const KaliLinuxTab: React.FC<KaliLinuxTabProps> = ({
   onLoadCodeToPipeline,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'terminal' | 'tools' | 'scenarios' | 'specs'
-  >('terminal');
+    'terminal' | 'tools' | 'scenarios' | 'audit-ledger' | 'specs'
+  >('audit-ledger');
+
+  // Ledger & Remediation State
+  const [ledgerModifications, setLedgerModifications] = useState<SecurityModification[]>(
+    INITIAL_SECURITY_MODIFICATIONS
+  );
+  const [auditSummary, setAuditSummary] = useState<KaliAuditSummary>(INITIAL_KALI_AUDIT_SUMMARY);
+  const [isAuditing, setIsAuditing] = useState<boolean>(false);
+  const [ledgerStatusFilter, setLedgerStatusFilter] = useState<'ALL' | 'APPLIED' | 'ROLLED_BACK'>('ALL');
+  const [ledgerSeverityFilter, setLedgerSeverityFilter] = useState<'ALL' | 'CRITICAL' | 'HIGH' | 'MEDIUM'>('ALL');
+  const [expandedDiffId, setExpandedDiffId] = useState<string | null>('MOD-SEC-01-CSP');
+  const [ledgerSearchQuery, setLedgerSearchQuery] = useState<string>('');
+  const [showScannerLog, setShowScannerLog] = useState<boolean>(false);
+  const [scannerLogs, setScannerLogs] = useState<string[]>([
+    `[*] [2026-10-11T08:05:00Z] Initiating Kali Linux 2026.1 Full-Suite Security Audit against application host...`,
+    `[+] [Nikto v2.5.0] Auditing HTTP response headers, CSP policy, and MIME sniffing protections... [REMEDIATED]`,
+    `[+] [sslscan v2.1.3] Testing TLS 1.3 key exchange suites, curve parameters, and HSTS enforcement... [REMEDIATED]`,
+    `[+] [Nmap v7.94] Running NSE script ssl-enum-ciphers and detecting classical RSA/ECC exposure... [REMEDIATED]`,
+    `[+] [Lynis v3.1.0] Evaluating host system compliance, body parser caps, and kernel hardening... [REMEDIATED]`,
+    `[+] [SQLmap v1.8.2] Validating anti-injection input parameters and regex whitelist enforcement... [REMEDIATED]`,
+    `[+] [Burp Suite v2024.3] Running intruder rate-limit fuzzing and anti-flood validation... [REMEDIATED]`,
+    `[+] [John the Ripper v1.9.0] Benchmarking cryptographic hash quantum Grover resistance... [REMEDIATED]`,
+    `[+] [Ghidra v11.0.1] Disassembling frontend distribution bundle for hardcoded credential leaks... [REMEDIATED]`,
+    `[+] [checksec v2.6.0] Checking binary exploit mitigations: Full RELRO, Stack Canary, NX, PIE... [REMEDIATED]`,
+    `[+] [TShark v4.2.2] Dissecting TLS 1.3 KeyShare extension: NIST FIPS 203 ML-KEM-768 verified. [VERIFIED]`,
+    `[✓] Audit completed across all 10 Kali Linux security features. All findings cataloged into Reversible Ledger.`,
+  ]);
 
   // Terminal State
   const [terminalHistory, setTerminalHistory] = useState<KaliTerminalLine[]>([
@@ -95,6 +143,94 @@ export const KaliLinuxTab: React.FC<KaliLinuxTabProps> = ({
     navigator.clipboard.writeText(text);
     setCopiedKey(key);
     setTimeout(() => setCopiedKey(null), 2000);
+  };
+
+  // Initialize ledger on mount
+  useEffect(() => {
+    kaliAuditService.getLedger().then(setLedgerModifications).catch(console.error);
+    kaliAuditService.getSummary().then(setAuditSummary).catch(console.error);
+  }, []);
+
+  const handleRunFullAudit = async () => {
+    setIsAuditing(true);
+    triggerNotice('RUNNING KALI FULL SUITE SECURITY AUDIT (10 Features)...');
+    try {
+      const result = await kaliAuditService.runFullAudit();
+      setLedgerModifications(result.modifications);
+      setAuditSummary(result.summary);
+      if (result.executionLog && result.executionLog.length > 0) {
+        setScannerLogs(result.executionLog);
+        setShowScannerLog(true);
+      }
+
+      // Append results to terminal history
+      const logLines: KaliTerminalLine[] = result.executionLog.map((log, i) => ({
+        id: `audit-${Date.now()}-${i}`,
+        type: log.startsWith('[✓]') ? 'success' : log.startsWith('[-]') ? 'error' : 'system',
+        content: log,
+      }));
+      setTerminalHistory((prev) => [...prev, ...logLines]);
+      triggerNotice(`Audit Completed! Overall Security Score: ${result.summary.overallSecurityScore}/100.`);
+    } catch (err: any) {
+      triggerNotice(`Audit Error: ${err?.message || 'Unable to complete scan'}`);
+    } finally {
+      setIsAuditing(false);
+    }
+  };
+
+  const handleToggleRemediation = async (id: string) => {
+    try {
+      const updated = await kaliAuditService.toggleModification(id);
+      setLedgerModifications((prev) => prev.map((m) => (m.id === id ? updated : m)));
+      const sum = await kaliAuditService.getSummary();
+      setAuditSummary(sum);
+
+      const action = updated.status === 'APPLIED' ? 'Applied' : 'Rolled Back';
+      triggerNotice(`Modification ${id} ${action} independently. Security Score: ${sum.overallSecurityScore}/100.`);
+    } catch (err: any) {
+      triggerNotice(`Failed to toggle modification ${id}: ${err?.message}`);
+    }
+  };
+
+  const handleApplyAll = async () => {
+    try {
+      const updatedList = await kaliAuditService.applyAll();
+      setLedgerModifications(updatedList);
+      const sum = await kaliAuditService.getSummary();
+      setAuditSummary(sum);
+      triggerNotice(`All 12 Kali security remediations APPLIED. Security Score: ${sum.overallSecurityScore}/100.`);
+    } catch (err: any) {
+      triggerNotice(`Apply All Error: ${err?.message}`);
+    }
+  };
+
+  const handleRollbackAll = async () => {
+    try {
+      const updatedList = await kaliAuditService.rollbackAll();
+      setLedgerModifications(updatedList);
+      const sum = await kaliAuditService.getSummary();
+      setAuditSummary(sum);
+      triggerNotice(`All Kali security remediations ROLLED BACK. Security Score: ${sum.overallSecurityScore}/100.`);
+    } catch (err: any) {
+      triggerNotice(`Rollback Error: ${err?.message}`);
+    }
+  };
+
+  const handleExportLedgerJson = () => {
+    const payload = {
+      auditSummary,
+      ledger: ledgerModifications,
+      exportedAt: new Date().toISOString(),
+      platform: 'Kali Linux 2026.1 Rolling Security Remediation Engine',
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `kali-security-remediation-ledger-${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    triggerNotice('Security Remediation Ledger downloaded as JSON.');
   };
 
   const triggerNotice = (msg: string) => {
@@ -242,6 +378,21 @@ export const KaliLinuxTab: React.FC<KaliLinuxTabProps> = ({
         {/* Sub-Tabs Navigation */}
         <div className="mt-6 flex flex-wrap gap-2 border-t border-zinc-800 pt-4">
           <button
+            onClick={() => setActiveSubTab('audit-ledger')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'audit-ledger'
+                ? 'bg-sky-600 text-white shadow-md shadow-sky-900/40'
+                : 'bg-zinc-900/70 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 border border-zinc-800'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
+            <span>Audit & Reversible Remediation Ledger</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 border border-emerald-400/30 text-emerald-200">
+              {auditSummary.activeRemediationsCount}/{auditSummary.totalVulnerabilitiesIdentified} Active
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveSubTab('terminal')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               activeSubTab === 'terminal'
@@ -308,6 +459,560 @@ export const KaliLinuxTab: React.FC<KaliLinuxTabProps> = ({
             <span>{lastActionNotice}</span>
           </div>
           <span className="text-[10px] text-zinc-400">KALI KERNEL 6.6 CONFIRMED</span>
+        </div>
+      )}
+
+      {/* SUB-TAB 0: REVERSIBLE SECURITY AUDIT & REMEDIATION LEDGER */}
+      {activeSubTab === 'audit-ledger' && (
+        <div className="space-y-6">
+          {/* Top Posture Dashboard Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Overall Security Score */}
+            <div className="p-4 rounded-xl border border-sky-500/30 bg-zinc-950/80 shadow-lg relative overflow-hidden flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-zinc-400">Security Health Score</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    auditSummary.overallSecurityScore >= 90
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : auditSummary.overallSecurityScore >= 70
+                      ? 'bg-amber-950 text-amber-300 border border-amber-800'
+                      : 'bg-rose-950 text-rose-300 border border-rose-800'
+                  }`}
+                >
+                  {auditSummary.overallSecurityScore >= 90
+                    ? 'Hardened'
+                    : auditSummary.overallSecurityScore >= 70
+                    ? 'Partially Protected'
+                    : 'Critical Exposure'}
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span
+                  className={`text-3xl font-extrabold font-mono tracking-tight ${
+                    auditSummary.overallSecurityScore >= 90
+                      ? 'text-emerald-400'
+                      : auditSummary.overallSecurityScore >= 70
+                      ? 'text-amber-400'
+                      : 'text-rose-400'
+                  }`}
+                >
+                  {auditSummary.overallSecurityScore}
+                </span>
+                <span className="text-sm font-mono text-zinc-500">/ 100</span>
+              </div>
+              <div className="mt-3 w-full bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className={`h-full transition-all duration-500 ${
+                    auditSummary.overallSecurityScore >= 90
+                      ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                      : auditSummary.overallSecurityScore >= 70
+                      ? 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                      : 'bg-gradient-to-r from-rose-500 to-red-400'
+                  }`}
+                  style={{ width: `${auditSummary.overallSecurityScore}%` }}
+                />
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-400">
+                Dynamically tied to active remediations and middleware defenses
+              </p>
+            </div>
+
+            {/* Active Remediations vs Rolled Back */}
+            <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/80 shadow-lg flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-zinc-400">Remediation Status</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-zinc-900 text-zinc-300 border border-zinc-800">
+                  Reversible
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold font-mono text-white">
+                  {auditSummary.activeRemediationsCount}
+                </span>
+                <span className="text-sm font-mono text-zinc-500">
+                  / {auditSummary.totalVulnerabilitiesIdentified} Active
+                </span>
+              </div>
+              <div className="mt-3 flex items-center justify-between text-[11px] font-mono">
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  {auditSummary.activeRemediationsCount} Applied
+                </span>
+                <span
+                  className={`flex items-center gap-1 ${
+                    auditSummary.rolledBackCount > 0 ? 'text-rose-400' : 'text-zinc-500'
+                  }`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  {auditSummary.rolledBackCount} Rolled Back
+                </span>
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-400">
+                Every patch can be independently reversed or re-applied
+              </p>
+            </div>
+
+            {/* Kali Features Evaluated */}
+            <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/80 shadow-lg flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-zinc-400">Kali Security Suite</span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-sky-950 text-sky-300 border border-sky-800">
+                  Full Coverage
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span className="text-3xl font-extrabold font-mono text-sky-400">
+                  {auditSummary.featuresEvaluated}
+                </span>
+                <span className="text-sm font-mono text-zinc-500">/ 10 Features</span>
+              </div>
+              <div className="mt-2 text-[10px] font-mono text-zinc-400 truncate">
+                Nikto · sslscan · Nmap · Lynis · SQLmap · Burp · John · Ghidra · checksec · TShark
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-400">
+                Automated continuous verification against the running application
+              </p>
+            </div>
+
+            {/* Post-Quantum Crypto & CNSA 2.0 Compliance */}
+            <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/80 shadow-lg flex flex-col justify-between">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-mono uppercase text-zinc-400">Quantum Resilience</span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                    auditSummary.cnsa2CompliancePercent === 100
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : 'bg-rose-950 text-rose-300 border border-rose-800'
+                  }`}
+                >
+                  {auditSummary.cnsa2CompliancePercent}% CNSA 2.0
+                </span>
+              </div>
+              <div className="mt-3 flex items-baseline gap-2">
+                <span
+                  className={`text-3xl font-extrabold font-mono ${
+                    auditSummary.classicalCryptoExposureScore === 0 ? 'text-emerald-400' : 'text-rose-400'
+                  }`}
+                >
+                  {auditSummary.classicalCryptoExposureScore}%
+                </span>
+                <span className="text-sm font-mono text-zinc-500">Exposure</span>
+              </div>
+              <div className="mt-2 text-[10px] font-mono text-zinc-300">
+                {auditSummary.classicalCryptoExposureScore === 0
+                  ? 'NIST FIPS 203 ML-KEM-768 Enforced'
+                  : 'Vulnerable: Harvest-Now-Decrypt-Later'}
+              </div>
+              <p className="mt-2 text-[10px] text-zinc-400">
+                Quantum forward secrecy protecting against CRQC threats
+              </p>
+            </div>
+          </div>
+
+          {/* Action Control Bar */}
+          <div className="p-4 rounded-2xl border border-sky-500/30 bg-zinc-950/90 shadow-xl flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-sky-950 border border-sky-500/40 flex items-center justify-center text-sky-400 shrink-0">
+                <ShieldCheck className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <span>Kali Linux Security Remediation Ledger</span>
+                  <span className="px-2 py-0.2 rounded text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
+                    Host: 127.0.0.1:3000
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Every audit finding is remediated with an independent, non-destructive rollback switch and verification hash.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={handleRunFullAudit}
+                disabled={isAuditing}
+                className="px-3.5 py-2 rounded-xl text-xs font-bold font-mono bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white shadow-lg shadow-sky-950/50 flex items-center gap-2 cursor-pointer transition-transform active:scale-95 disabled:opacity-50"
+              >
+                {isAuditing ? (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Play className="w-3.5 h-3.5" />
+                )}
+                <span>{isAuditing ? 'Auditing 10 Features...' : 'Run Full Kali Security Audit'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleApplyAll}
+                className="px-3 py-2 rounded-xl text-xs font-semibold font-mono bg-emerald-600 hover:bg-emerald-500 text-black shadow-md flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
+                title="Apply all 12 security remediations"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Apply All</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRollbackAll}
+                className="px-3 py-2 rounded-xl text-xs font-semibold font-mono bg-zinc-900 hover:bg-rose-950 hover:text-rose-300 hover:border-rose-800 text-zinc-300 border border-zinc-800 shadow-md flex items-center gap-1.5 cursor-pointer transition-transform active:scale-95"
+                title="Roll back all remediations to baseline"
+              >
+                <Undo2 className="w-3.5 h-3.5 text-rose-400" />
+                <span>Rollback All</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowScannerLog(!showScannerLog)}
+                className={`px-3 py-2 rounded-xl text-xs font-semibold font-mono border transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  showScannerLog
+                    ? 'bg-sky-950 text-sky-300 border-sky-600'
+                    : 'bg-zinc-900 text-zinc-300 border-zinc-800 hover:bg-zinc-850'
+                }`}
+                title="Toggle Live Security Scanner Log"
+              >
+                <Terminal className="w-3.5 h-3.5 text-sky-400" />
+                <span>{showScannerLog ? 'Hide Logs' : 'Scanner Logs'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportLedgerJson}
+                className="px-3 py-2 rounded-xl text-xs font-semibold font-mono bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-zinc-800 shadow-md flex items-center gap-1.5 cursor-pointer"
+                title="Export Ledger with cryptographic verification hashes"
+              >
+                <Download className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Export JSON</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Collapsible Live Scanner Output Box */}
+          {showScannerLog && (
+            <div className="rounded-2xl border border-sky-500/40 bg-black p-4 font-mono text-xs space-y-2 shadow-2xl animate-in fade-in duration-200">
+              <div className="flex items-center justify-between border-b border-zinc-800 pb-2">
+                <div className="flex items-center gap-2 text-sky-300 font-bold">
+                  <Terminal className="w-4 h-4 text-sky-400" />
+                  <span>Kali Linux 2026.1 Live Automated Audit Scanner Console</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-zinc-500">10 SUITE CHECKS COMPLETED</span>
+                  <button
+                    onClick={() => setShowScannerLog(false)}
+                    className="text-zinc-500 hover:text-white text-xs cursor-pointer px-1.5 py-0.5 rounded hover:bg-zinc-800"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-60 overflow-y-auto space-y-1 text-zinc-300 pr-2">
+                {scannerLogs.map((log, idx) => {
+                  const isSuccess = log.startsWith('[✓]') || log.includes('[REMEDIATED]') || log.includes('[VERIFIED]');
+                  const isInfo = log.startsWith('[+]') || log.startsWith('[*]');
+                  return (
+                    <div
+                      key={idx}
+                      className={`leading-relaxed text-[11px] ${
+                        isSuccess ? 'text-emerald-300' : isInfo ? 'text-sky-300' : 'text-zinc-400'
+                      }`}
+                    >
+                      {log}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Search & Filter Toolbar */}
+          <div className="p-4 rounded-xl border border-zinc-800 bg-zinc-950/80 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            {/* Search */}
+            <div className="relative w-full md:w-80">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={ledgerSearchQuery}
+                onChange={(e) => setLedgerSearchQuery(e.target.value)}
+                placeholder="Search ledger by tool, CWE, title, file..."
+                className="w-full pl-9 pr-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-mono text-white placeholder:text-zinc-500 focus:outline-hidden focus:border-sky-500"
+              />
+            </div>
+
+            {/* Filter Group */}
+            <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+              <span className="text-zinc-500 text-[11px]">Status:</span>
+              {(['ALL', 'APPLIED', 'ROLLED_BACK'] as const).map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setLedgerStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
+                    ledgerStatusFilter === st
+                      ? 'bg-sky-500 text-black'
+                      : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                  }`}
+                >
+                  {st === 'ALL'
+                    ? `ALL (${ledgerModifications.length})`
+                    : st === 'APPLIED'
+                    ? `APPLIED (${ledgerModifications.filter((m) => m.status === 'APPLIED').length})`
+                    : `ROLLED BACK (${ledgerModifications.filter((m) => m.status === 'ROLLED_BACK').length})`}
+                </button>
+              ))}
+
+              <span className="text-zinc-500 text-[11px] ml-2">Severity:</span>
+              {(['ALL', 'CRITICAL', 'HIGH', 'MEDIUM'] as const).map((sev) => (
+                <button
+                  key={sev}
+                  onClick={() => setLedgerSeverityFilter(sev)}
+                  className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer ${
+                    ledgerSeverityFilter === sev
+                      ? 'bg-zinc-200 text-black'
+                      : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                  }`}
+                >
+                  {sev}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Ledger Modification Cards */}
+          <div className="space-y-4">
+            {ledgerModifications
+              .filter((mod) => {
+                const matchesStatus =
+                  ledgerStatusFilter === 'ALL' || mod.status === ledgerStatusFilter;
+                const matchesSeverity =
+                  ledgerSeverityFilter === 'ALL' || mod.severity === ledgerSeverityFilter;
+                const matchesSearch =
+                  !ledgerSearchQuery.trim() ||
+                  mod.title.toLowerCase().includes(ledgerSearchQuery.toLowerCase()) ||
+                  mod.description.toLowerCase().includes(ledgerSearchQuery.toLowerCase()) ||
+                  mod.toolSource.toLowerCase().includes(ledgerSearchQuery.toLowerCase()) ||
+                  mod.id.toLowerCase().includes(ledgerSearchQuery.toLowerCase()) ||
+                  mod.cwe.toLowerCase().includes(ledgerSearchQuery.toLowerCase()) ||
+                  mod.targetComponent.toLowerCase().includes(ledgerSearchQuery.toLowerCase());
+                return matchesStatus && matchesSeverity && matchesSearch;
+              })
+              .map((mod) => {
+                const isApplied = mod.status === 'APPLIED';
+                const isExpanded = expandedDiffId === mod.id;
+
+                const severityColors = {
+                  CRITICAL: 'bg-rose-950/80 text-rose-300 border-rose-800',
+                  HIGH: 'bg-amber-950/80 text-amber-300 border-amber-800',
+                  MEDIUM: 'bg-yellow-950/80 text-yellow-300 border-yellow-800',
+                  LOW: 'bg-blue-950/80 text-blue-300 border-blue-800',
+                }[mod.severity];
+
+                return (
+                  <div
+                    key={mod.id}
+                    className={`rounded-2xl border p-5 transition-all font-mono text-xs space-y-4 ${
+                      isApplied
+                        ? 'border-zinc-800 bg-zinc-950/80 hover:border-zinc-700'
+                        : 'border-rose-900/40 bg-zinc-950/90 ring-1 ring-rose-500/20'
+                    }`}
+                  >
+                    {/* Header Row */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-900 text-sky-400 border border-zinc-800">
+                          {mod.id}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${severityColors}`}>
+                          {mod.severity}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-zinc-900 text-zinc-300 border border-zinc-800">
+                          {mod.toolSource}
+                        </span>
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-sky-950/60 text-sky-300 border border-sky-800/60">
+                          {mod.kaliCategory}
+                        </span>
+                        <span className="text-[10px] text-zinc-500">
+                          {mod.cwe} · {mod.owaspCategory}
+                        </span>
+                      </div>
+
+                      {/* Status & Reversal Toggle Button */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1.5 border ${
+                            isApplied
+                              ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                              : 'bg-rose-950 text-rose-300 border-rose-800 animate-pulse'
+                          }`}
+                        >
+                          {isApplied ? (
+                            <>
+                              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                              <span>ACTIVE · REMEDIATED</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+                              <span>ROLLED BACK · VULNERABLE</span>
+                            </>
+                          )}
+                        </span>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRemediation(mod.id)}
+                          className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-md active:scale-95 ${
+                            isApplied
+                              ? 'bg-zinc-900 hover:bg-rose-950 hover:text-rose-200 text-zinc-300 border border-zinc-800 hover:border-rose-800'
+                              : 'bg-emerald-600 hover:bg-emerald-500 text-black shadow-emerald-950'
+                          }`}
+                          title={
+                            isApplied
+                              ? 'Roll back this modification independently'
+                              : 'Re-apply this security remediation'
+                          }
+                        >
+                          {isApplied ? (
+                            <>
+                              <RotateCcw className="w-3 h-3 text-rose-400" />
+                              <span>Revert Modification</span>
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-3 h-3" />
+                              <span>Apply Remediation</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Title & Description */}
+                    <div className="space-y-1">
+                      <h4 className="text-base font-bold text-white tracking-tight flex items-center gap-2 font-sans">
+                        <span>{mod.title}</span>
+                      </h4>
+                      <p className="text-xs text-zinc-300 leading-relaxed font-sans">
+                        {mod.description}
+                      </p>
+                    </div>
+
+                    {/* Metadata & Actions Row */}
+                    <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 flex flex-col md:flex-row md:items-center justify-between gap-3 text-[11px]">
+                      <div className="space-y-1 text-zinc-400">
+                        <div>
+                          <span className="text-zinc-500 uppercase text-[10px]">Target File: </span>
+                          <span className="text-white font-bold">{mod.targetComponent}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px]">
+                          <span className="text-zinc-500">SHA-256 Checksum:</span>
+                          <span className="text-zinc-400 truncate max-w-xs">{mod.sha256Hash}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopy(mod.sha256Hash, `hash-${mod.id}`)}
+                            className="text-sky-400 hover:text-sky-300 cursor-pointer"
+                            title="Copy checksum"
+                          >
+                            {copiedKey === `hash-${mod.id}` ? '✓ Copied' : 'Copy'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedDiffId(isExpanded ? null : mod.id)}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 hover:text-white flex items-center gap-1.5 cursor-pointer text-xs"
+                        >
+                          <FileCode2 className="w-3.5 h-3.5 text-sky-400" />
+                          <span>{isExpanded ? 'Hide Diff' : 'Inspect Code Diff'}</span>
+                          {isExpanded ? (
+                            <ChevronUp className="w-3 h-3" />
+                          ) : (
+                            <ChevronDown className="w-3 h-3" />
+                          )}
+                        </button>
+
+                        {onLoadCodeToPipeline && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onLoadCodeToPipeline(mod.codeDiff.after);
+                              triggerNotice(`Remediation ${mod.id} loaded into PQC Migration Pipeline.`);
+                            }}
+                            className="px-2.5 py-1 rounded-lg bg-sky-950 hover:bg-sky-900 border border-sky-800 text-sky-200 flex items-center gap-1.5 cursor-pointer text-xs"
+                            title="Load patched code to PQC Pipeline"
+                          >
+                            <ExternalLink className="w-3 h-3" />
+                            <span>PQC Pipeline</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Expandable Code Diff Inspector */}
+                    {isExpanded && (
+                      <div className="space-y-3 pt-2 border-t border-zinc-800/80 animate-in fade-in duration-150">
+                        <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                          <span>Modification Diff ({mod.codeDiff.fileName}):</span>
+                          <span className="text-[10px] text-zinc-500">
+                            Independent Reversal Action Available
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                          {/* Original / Rolled Back State */}
+                          <div className="rounded-xl border border-rose-950 bg-rose-950/20 p-3 space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-bold text-rose-400 pb-1 border-b border-rose-900/40">
+                              <span>ORIGINAL / VULNERABLE STATE</span>
+                              <span>(Rolled Back)</span>
+                            </div>
+                            <pre className="text-rose-200 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto leading-relaxed pt-1">
+                              {mod.codeDiff.before}
+                            </pre>
+                          </div>
+
+                          {/* Remediated Secure State */}
+                          <div className="rounded-xl border border-emerald-950 bg-emerald-950/20 p-3 space-y-1">
+                            <div className="flex items-center justify-between text-[10px] font-bold text-emerald-400 pb-1 border-b border-emerald-900/40">
+                              <span>KALI REMEDIATED STATE</span>
+                              <span>(Active Defense)</span>
+                            </div>
+                            <pre className="text-emerald-200 text-[11px] font-mono whitespace-pre-wrap overflow-x-auto leading-relaxed pt-1">
+                              {mod.codeDiff.after}
+                            </pre>
+                          </div>
+                        </div>
+
+                        {/* Rollback & PQC Details */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px] pt-1">
+                          <div className="p-2.5 rounded-lg bg-zinc-900 border border-zinc-800 space-y-1">
+                            <div className="text-[10px] text-amber-400 font-bold uppercase">
+                              Rollback Instructions & Impact
+                            </div>
+                            <p className="text-zinc-300 leading-relaxed">
+                              {mod.rollbackInstructions}
+                            </p>
+                          </div>
+
+                          <div className="p-2.5 rounded-lg bg-sky-950/30 border border-sky-800/40 space-y-1">
+                            <div className="text-[10px] text-sky-400 font-bold uppercase flex items-center gap-1">
+                              <ShieldCheck className="w-3 h-3" />
+                              <span>Post-Quantum Security Relevance</span>
+                            </div>
+                            <p className="text-sky-200 leading-relaxed">
+                              {mod.pqcRelevance}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
         </div>
       )}
 

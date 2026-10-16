@@ -15,7 +15,6 @@ import {
   FileCheck2,
   Sliders,
   ChevronRight,
-  Smartphone,
   Cpu,
   Radar,
   Flame,
@@ -25,6 +24,8 @@ import {
   Binary,
   ShieldCheck,
   Plane,
+  Dna,
+  MessageSquare,
 } from 'lucide-react';
 import { PipelineResult } from '../types/pqc';
 
@@ -47,7 +48,10 @@ interface NavbarProps {
     | 'f22-raptor'
     | 'f35'
     | 'b21'
-    | 'kali-linux';
+    | 'kali-linux'
+    | 'bioscience'
+    | 'gemini-chat'
+    | 'zero-trust-compliance';
   onSelectView: (
     view:
       | 'pipeline'
@@ -68,12 +72,14 @@ interface NavbarProps {
       | 'f35'
       | 'b21'
       | 'kali-linux'
+      | 'bioscience'
+      | 'gemini-chat'
+      | 'zero-trust-compliance'
   ) => void;
   onOpenSettings: () => void;
   onOpenExport: () => void;
   onOpenSaveModal: () => void;
   onOpenSavedDrawer: () => void;
-  onOpenIPhoneSimulator?: () => void;
   savedCount: number;
   result: PipelineResult | null;
   isRunning: boolean;
@@ -87,7 +93,6 @@ export const Navbar: React.FC<NavbarProps> = ({
   onOpenExport,
   onOpenSaveModal,
   onOpenSavedDrawer,
-  onOpenIPhoneSimulator,
   savedCount,
   result,
   isRunning,
@@ -130,7 +135,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Desktop View Switcher: Pipeline vs Aikido Security vs Enterprise Integrations (hidden on mobile, shown md+) */}
-        <div className="hidden md:flex items-center p-1 bg-zinc-900 border border-zinc-800 rounded-lg text-xs">
+        <div className="hidden md:flex items-center gap-1 p-1 bg-zinc-900 border border-zinc-800 rounded-lg text-xs overflow-x-auto max-w-[calc(100vw-460px)] shrink">
           <button
             onClick={() => onSelectView('pipeline')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer shrink-0 ${
@@ -300,6 +305,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           <button
+            onClick={() => onSelectView('zero-trust-compliance')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer shrink-0 ${
+              activeView === 'zero-trust-compliance'
+                ? 'bg-cyan-950/90 text-cyan-200 shadow-xs ring-1 ring-cyan-500/80'
+                : 'text-zinc-400 hover:text-cyan-300'
+            }`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Zero Trust Compliance</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-cyan-950 border border-cyan-700 text-cyan-300 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+              Ingress Telemetry
+            </span>
+          </button>
+
+          <button
             onClick={() => onSelectView('nsa-software')}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer shrink-0 ${
               activeView === 'nsa-software'
@@ -308,9 +329,10 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             <FolderGit2 className="w-3.5 h-3.5 text-blue-400" />
-            <span>NSA Software</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-blue-950 border border-blue-800 text-blue-300">
-              Ghidra · WALKOFF
+            <span>NSA Suite</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-rose-950 border border-rose-800 text-rose-300 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+              Zero Trust · Insider Defense
             </span>
           </button>
 
@@ -403,6 +425,36 @@ export const Navbar: React.FC<NavbarProps> = ({
               Full Suite · 3,842 Tools
             </span>
           </button>
+
+          <button
+            onClick={() => onSelectView('bioscience')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-medium transition-colors cursor-pointer shrink-0 ${
+              activeView === 'bioscience'
+                ? 'bg-emerald-950/90 text-emerald-200 shadow-xs ring-1 ring-emerald-500/80'
+                : 'text-zinc-400 hover:text-emerald-300'
+            }`}
+          >
+            <Dna className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Bioscience & AI</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-800 text-emerald-300">
+              AlphaFold · Gemini
+            </span>
+          </button>
+
+          <button
+            onClick={() => onSelectView('gemini-chat')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold transition-all cursor-pointer shrink-0 ${
+              activeView === 'gemini-chat'
+                ? 'bg-purple-900 text-purple-100 shadow-xs ring-1 ring-purple-400'
+                : 'text-purple-300 hover:text-purple-100 bg-purple-950/40 hover:bg-purple-950/80 border border-purple-800/60'
+            }`}
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-purple-400 animate-pulse" />
+            <span>Gemini Chat</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-purple-950 border border-purple-700 text-purple-300">
+              AI Multi-Turn
+            </span>
+          </button>
         </div>
 
         {/* Action Controls */}
@@ -430,17 +482,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
-          {/* iPhone 15 Viewport / Simulator */}
-          {onOpenIPhoneSimulator && (
-            <button
-              onClick={onOpenIPhoneSimulator}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded text-xs font-medium border border-zinc-750 hover:border-zinc-600 bg-zinc-850 hover:bg-zinc-800 text-zinc-200 hover:text-white transition-colors cursor-pointer active:scale-95 shadow-xs"
-              title="Preview on Apple iPhone 15 with Dynamic Island & Apple Pay"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-              <span>iPhone 15</span>
-            </button>
-          )}
+          {/* Gemini AI Advisor Quick Access Button */}
+          <button
+            onClick={() => onSelectView('gemini-chat')}
+            className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded text-xs font-semibold transition-all cursor-pointer shadow-xs active:scale-95 shrink-0 ${
+              activeView === 'gemini-chat'
+                ? 'bg-purple-600 text-white ring-2 ring-purple-400 shadow-purple-900/50'
+                : 'bg-purple-950/80 hover:bg-purple-900/90 text-purple-200 border border-purple-800/80 hover:border-purple-600'
+            }`}
+            title="Open Gemini AI Cryptographic & Operations Advisor"
+          >
+            <MessageSquare className="w-3.5 h-3.5 text-purple-300 animate-pulse" />
+            <span>Gemini AI</span>
+            <span className="hidden sm:inline px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-purple-900 text-purple-200 border border-purple-700">
+              Live
+            </span>
+          </button>
 
           {/* Desktop Only: Settings & Export */}
           <button
@@ -682,6 +739,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             </span>
           </button>
 
+          {/* Tab: Zero Trust Compliance */}
+          <button
+            onClick={() => handleSelectViewMobile('zero-trust-compliance')}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-lg font-medium transition-all cursor-pointer min-h-[42px] ${
+              activeView === 'zero-trust-compliance'
+                ? 'bg-cyan-950/80 text-cyan-300 shadow-sm ring-1 ring-cyan-500/60'
+                : 'text-zinc-400 hover:text-cyan-300'
+            }`}
+          >
+            <div className="flex items-center gap-0.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <span className="text-[10px] font-semibold leading-tight text-center">ZT</span>
+            </div>
+            <span className="px-1 py-0.1 rounded text-[8px] font-mono font-bold leading-none bg-cyan-950 border border-cyan-800 text-cyan-300">
+              Audit
+            </span>
+          </button>
+
           {/* Tab 12: NSA Software */}
           <button
             onClick={() => handleSelectViewMobile('nsa-software')}
@@ -695,8 +770,8 @@ export const Navbar: React.FC<NavbarProps> = ({
               <FolderGit2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
               <span className="text-[10px] font-semibold leading-tight text-center">NSA</span>
             </div>
-            <span className="px-1 py-0.1 rounded text-[8px] font-mono font-bold leading-none bg-blue-950 border border-blue-800 text-blue-300">
-              Ghidra
+            <span className="px-1 py-0.1 rounded text-[8px] font-mono font-bold leading-none bg-rose-950 border border-rose-800 text-rose-300">
+              Hardened
             </span>
           </button>
 
@@ -807,6 +882,24 @@ export const Navbar: React.FC<NavbarProps> = ({
               Tools
             </span>
           </button>
+
+          {/* Tab 19: Gemini Chat */}
+          <button
+            onClick={() => handleSelectViewMobile('gemini-chat')}
+            className={`flex flex-col items-center justify-center gap-0.5 py-1 px-1 rounded-lg font-medium transition-all cursor-pointer min-h-[42px] ${
+              activeView === 'gemini-chat'
+                ? 'bg-purple-950/80 text-purple-300 shadow-sm ring-1 ring-purple-500/60'
+                : 'text-zinc-400 hover:text-purple-300'
+            }`}
+          >
+            <div className="flex items-center gap-0.5">
+              <MessageSquare className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+              <span className="text-[10px] font-semibold leading-tight text-center">Chat</span>
+            </div>
+            <span className="px-1 py-0.1 rounded text-[8px] font-mono font-bold leading-none bg-purple-950 border border-purple-800 text-purple-300">
+              Gemini
+            </span>
+          </button>
         </nav>
       </div>
 
@@ -819,23 +912,20 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           <div className="grid grid-cols-2 gap-2">
-            {onOpenIPhoneSimulator && (
-              <button
-                onClick={() => {
-                  onOpenIPhoneSimulator();
-                  setMobileMenuOpen(false);
-                }}
-                className="col-span-2 flex items-center gap-2 p-2.5 rounded-lg bg-zinc-900 border border-emerald-900/60 text-zinc-200 hover:text-white hover:border-emerald-700 text-xs text-left cursor-pointer active:scale-98"
-              >
-                <div className="w-7 h-7 rounded bg-emerald-950/80 border border-emerald-700 flex items-center justify-center text-emerald-400 shrink-0">
-                  <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-                </div>
-                <div className="min-w-0">
-                  <div className="font-semibold text-emerald-300 truncate">iPhone 15 Simulator Mode</div>
-                  <div className="text-[10px] text-zinc-400 truncate">Dynamic Island & Apple Pay Face ID simulation</div>
-                </div>
-              </button>
-            )}
+            <button
+              onClick={() => {
+                handleSelectViewMobile('gemini-chat');
+              }}
+              className="col-span-2 flex items-center gap-2 p-2.5 rounded-lg bg-zinc-900 border border-purple-900/60 text-zinc-200 hover:text-white hover:border-purple-700 text-xs text-left cursor-pointer active:scale-98"
+            >
+              <div className="w-7 h-7 rounded bg-purple-950/80 border border-purple-700 flex items-center justify-center text-purple-400 shrink-0">
+                <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+              </div>
+              <div className="min-w-0">
+                <div className="font-semibold text-purple-300 truncate">Gemini AI Multi-Turn Chatbot</div>
+                <div className="text-[10px] text-zinc-400 truncate">PQC Architect, Avionics, Threat & Bio-Research AI</div>
+              </div>
+            </button>
 
             <button
               onClick={() => {

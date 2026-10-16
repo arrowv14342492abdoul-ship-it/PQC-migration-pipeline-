@@ -1,4 +1,4 @@
-import { CbomItem, PipelineOptions } from '../types/pqc';
+import type { CbomItem, PipelineOptions } from '../types/pqc.ts';
 
 export interface OfflineAnalysisResult {
   audit: string;
@@ -34,42 +34,101 @@ export function generateOfflinePqcAnalysis(
 
   const cbom: CbomItem[] = [];
 
+  const nistLevelInt = nistLevel.includes('Level 1') ? 1 : nistLevel.includes('Level 5') ? 5 : 3;
+
   if (hasRSA) {
     cbom.push({
+      id: 'cbom-rsa-2048',
+      bomRef: 'urn:cdx:crypto/algorithm/rsa-2048',
+      primitive: 'RSA-2048',
+      fileLocation: 'security/crypto_vault.py',
+      lineNumber: 14,
+      quantumVulnerability: 'shor-critical',
+      nistReplacement: `${kemAlg} (FIPS 203)`,
+      hybridRecommendation: `X25519${kemAlg.replace('-', '')}`,
+      estimatedCycleOverheadPct: 18.5,
+      pubkeySizeBytes: kemAlg === 'ML-KEM-512' ? 800 : kemAlg === 'ML-KEM-1024' ? 1568 : 1184,
+      ciphertextOrSigSizeBytes: kemAlg === 'ML-KEM-512' ? 768 : kemAlg === 'ML-KEM-1024' ? 1568 : 1088,
+      cycloneDx: {
+        assetType: 'algorithm',
+        oid: '1.2.840.113549.1.1.1',
+        algorithmProperties: {
+          primitive: 'kem',
+          parameterSetIdentifier: kemAlg,
+          executionEnvironment: 'software-plain-ram',
+          nistQuantumSecurityLevel: nistLevelInt as 1 | 3 | 5,
+        },
+      },
       algorithm: 'RSA-2048',
-      primitive: 'Asymmetric Key Encapsulation / Encryption',
       vulnerability: "Shor's Algorithm (Integer Factorization) / Harvest-Now-Decrypt-Later (HNDL)",
       riskTier: 'CRITICAL',
       fipsStandard: 'FIPS 203 (ML-KEM)',
-      nistReplacement: `${kemAlg} (Kyber)`,
       locations: 'Key generation and encryption blocks',
       classicalKeySize: '2048-bit (256 bytes)',
-      postQuantumKeySize: '1,184-byte public key',
+      postQuantumKeySize: `${kemAlg === 'ML-KEM-512' ? 800 : kemAlg === 'ML-KEM-1024' ? 1568 : 1184}-byte public key`,
     });
   }
 
   if (hasECDSA) {
     cbom.push({
+      id: 'cbom-ecdsa-p256',
+      bomRef: 'urn:cdx:crypto/algorithm/ecdsa-p256',
+      primitive: 'ECDSA-P256',
+      fileLocation: 'security/signature_signer.py',
+      lineNumber: 28,
+      quantumVulnerability: 'shor-critical',
+      nistReplacement: `${dsaAlg} (FIPS 204)`,
+      hybridRecommendation: `ECDSA-P256 + ${dsaAlg}`,
+      estimatedCycleOverheadPct: 22.0,
+      pubkeySizeBytes: dsaAlg === 'ML-DSA-44' ? 1312 : dsaAlg === 'ML-DSA-87' ? 2592 : 1952,
+      ciphertextOrSigSizeBytes: dsaAlg === 'ML-DSA-44' ? 2420 : dsaAlg === 'ML-DSA-87' ? 4595 : 3309,
+      cycloneDx: {
+        assetType: 'algorithm',
+        oid: '1.2.840.10045.2.1',
+        algorithmProperties: {
+          primitive: 'signature',
+          parameterSetIdentifier: dsaAlg,
+          executionEnvironment: 'software-plain-ram',
+          nistQuantumSecurityLevel: nistLevelInt as 1 | 3 | 5,
+        },
+      },
       algorithm: 'ECDSA secp256r1',
-      primitive: 'Digital Signature Algorithm',
       vulnerability: "Shor's Algorithm (Elliptic Curve Discrete Logarithm)",
       riskTier: 'CRITICAL',
       fipsStandard: 'FIPS 204 (ML-DSA)',
-      nistReplacement: `${dsaAlg} (Dilithium)`,
       locations: 'Signature generation and verification paths',
       classicalKeySize: '256-bit',
-      postQuantumKeySize: '1,952-byte public key',
+      postQuantumKeySize: `${dsaAlg === 'ML-DSA-44' ? 1312 : dsaAlg === 'ML-DSA-87' ? 2592 : 1952}-byte public key`,
     });
   }
 
   if (hasECDH) {
     cbom.push({
+      id: 'cbom-ecdh-x25519',
+      bomRef: 'urn:cdx:crypto/protocol/x25519-ecdh',
+      primitive: 'X25519 / ECDH',
+      fileLocation: 'security/handshake.py',
+      lineNumber: 19,
+      quantumVulnerability: 'shor-critical',
+      nistReplacement: `X25519 + ${kemAlg}`,
+      hybridRecommendation: `X25519${kemAlg.replace('-', '')}`,
+      estimatedCycleOverheadPct: 15.3,
+      pubkeySizeBytes: 32 + (kemAlg === 'ML-KEM-512' ? 800 : kemAlg === 'ML-KEM-1024' ? 1568 : 1184),
+      ciphertextOrSigSizeBytes: 32 + (kemAlg === 'ML-KEM-512' ? 768 : kemAlg === 'ML-KEM-1024' ? 1568 : 1088),
+      cycloneDx: {
+        assetType: 'protocol',
+        oid: '1.3.101.110',
+        algorithmProperties: {
+          primitive: 'kem',
+          parameterSetIdentifier: `Hybrid-X25519-${kemAlg}`,
+          executionEnvironment: 'software-plain-ram',
+          nistQuantumSecurityLevel: nistLevelInt as 1 | 3 | 5,
+        },
+      },
       algorithm: 'X25519 / ECDH',
-      primitive: 'Key Agreement / Diffie-Hellman',
       vulnerability: "Shor's Algorithm (Discrete Logarithm) / HNDL Passive Eavesdropping",
       riskTier: 'CRITICAL',
       fipsStandard: 'FIPS 203 (Hybrid KEM)',
-      nistReplacement: `X25519 + ${kemAlg}`,
       locations: 'Shared secret derivation routines',
       classicalKeySize: '256-bit',
       postQuantumKeySize: '1,088-byte ciphertext',
@@ -78,12 +137,31 @@ export function generateOfflinePqcAnalysis(
 
   if (hasAES || cbom.length === 0) {
     cbom.push({
+      id: 'cbom-aes-256-gcm',
+      bomRef: 'urn:cdx:crypto/algorithm/aes-256-gcm',
+      primitive: 'AES-256-GCM',
+      fileLocation: 'security/payload_cipher.py',
+      lineNumber: 45,
+      quantumVulnerability: 'grover-moderate',
+      nistReplacement: 'AES-256-GCM',
+      hybridRecommendation: 'AES-256-GCM (CNSA 2.0)',
+      estimatedCycleOverheadPct: 3.5,
+      pubkeySizeBytes: 0,
+      ciphertextOrSigSizeBytes: 16,
+      cycloneDx: {
+        assetType: 'algorithm',
+        oid: '2.16.840.1.101.3.4.1.46',
+        algorithmProperties: {
+          primitive: 'ae',
+          parameterSetIdentifier: 'AES-256-GCM',
+          executionEnvironment: 'software-plain-ram',
+          nistQuantumSecurityLevel: 5,
+        },
+      },
       algorithm: 'AES / Symmetric Transport',
-      primitive: 'Symmetric Cipher',
       vulnerability: "Grover's Algorithm quadratic key-search speedup (halves effective bits)",
       riskTier: 'HIGH',
       fipsStandard: 'FIPS 197 / SP 800-38D',
-      nistReplacement: 'AES-256-GCM',
       locations: 'Payload encryption layer',
       classicalKeySize: '128-bit / 256-bit',
       postQuantumKeySize: '256-bit DEK (128-bit quantum security)',
@@ -93,12 +171,30 @@ export function generateOfflinePqcAnalysis(
   // Fallback if none detected
   if (cbom.length === 0) {
     cbom.push({
+      id: 'cbom-generic-classical',
+      bomRef: 'urn:cdx:crypto/algorithm/generic-asymmetric',
+      primitive: 'Classical Asymmetric Primitive',
+      fileLocation: 'security/crypto_module.py',
+      lineNumber: 1,
+      quantumVulnerability: 'shor-critical',
+      nistReplacement: `${kemAlg} / ${dsaAlg}`,
+      hybridRecommendation: `Composite-Hybrid-${kemAlg}`,
+      estimatedCycleOverheadPct: 20.0,
+      pubkeySizeBytes: 1184,
+      ciphertextOrSigSizeBytes: 1088,
+      cycloneDx: {
+        assetType: 'algorithm',
+        algorithmProperties: {
+          primitive: 'kem',
+          parameterSetIdentifier: kemAlg,
+          executionEnvironment: 'software-plain-ram',
+          nistQuantumSecurityLevel: nistLevelInt as 1 | 3 | 5,
+        },
+      },
       algorithm: 'Classical Asymmetric Primitive',
-      primitive: 'Public-Key Cryptography',
       vulnerability: "Shor's Algorithm Polynomial-Time Decryption",
       riskTier: 'CRITICAL',
       fipsStandard: 'FIPS 203 & 204',
-      nistReplacement: `${kemAlg} / ${dsaAlg}`,
       locations: 'Codebase crypto imports',
       classicalKeySize: 'Legacy',
       postQuantumKeySize: 'NIST Standard',

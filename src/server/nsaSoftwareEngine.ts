@@ -1,8 +1,15 @@
-import {
+import type {
   NSARepository,
   GhidraAnalysisResult,
   WalkoffPlaybook,
-} from '../types/nsaSoftware.js';
+  GhidraHoneypot,
+  HoneypotTelemetryEvent,
+  GhidraCompromiseHardeningStatus,
+  ZeroTrustPillarControl,
+  CompromisedPersonnelRecord,
+  TwoPersonAuthorizationRequest,
+  ZeroTrustGlobalStatus,
+} from '../types/nsaSoftware.ts';
 
 export const NSA_REPOSITORIES: NSARepository[] = [
   {
@@ -428,11 +435,94 @@ void pqc_mlkem768_poly_ntt_neon(int16_t r[256], const int16_t a[256]) {
   },
 ];
 
+export const GHIDRA_COMPROMISE_HARDENING_STATUS = {
+  incidentId: 'NSA-CIRT-2026-GHIDRA-ZERO-TRUST',
+  threatLevel: 'CONTAINED_ZERO_TRUST' as const,
+  compromiseVectorsMitigated: [
+    {
+      id: 'vec-decompiler-heap',
+      vector: 'C++ Native Decompiler Binary Parser Heap Overflow & ROP Chain',
+      cveOrCwe: 'CWE-787 / Malicious ELF DWARF & SLEIGH Section Injection',
+      attackSurface: 'Ghidra native `decompile` child process parsing adversarial ELF/PE headers',
+      mitigationControl:
+        'Isolated ephemeral gVisor/Firecracker microVM per binary pass with strict seccomp-bpf syscall whitelist (`read`, `write`, `exit_group` only) and ASLR/CFI shadow stack.',
+      status: 'HARDENED' as const,
+    },
+    {
+      id: 'vec-pcode-poisoning',
+      vector: 'Trojanized SLEIGH / P-Code Specification Backdoor (False-Clean Crypto Audit)',
+      cveOrCwe: 'CWE-345 / Supply-Chain SLEIGH `.sla` Rule Tampering',
+      attackSurface: 'Compromised Ghidra processor module hiding backdoored RSA/ECC keys or falsifying ML-KEM constant-time loops',
+      mitigationControl:
+        '3-Way Byzantine Fault Tolerant (BFT) Multi-Lifter Consensus: Cross-verifies Ghidra P-Code against independent Radare2/Rizin ESIL and angr VEX IR + LLVM-MC AST hashes.',
+      status: 'ENFORCED' as const,
+    },
+    {
+      id: 'vec-jvm-rmi',
+      vector: 'Ghidra Server Java RMI Deserialization & Jython Post-Analysis RCE',
+      cveOrCwe: 'CWE-502 / Java ObjectInputStream & Untrusted Script Execution',
+      attackSurface: 'Collaborative Ghidra Server ports (13100-13102) and auto-triggered `.py`/`.java` analyzer extensions',
+      mitigationControl:
+        'Hard-blocked Java RMI sockets, network-airgapped null `netns`, read-only squashfs root, and mandatory NIST FIPS 204 ML-DSA-87 signature verification on all SLEIGH & script bundles.',
+      status: 'QUARANTINED' as const,
+    },
+    {
+      id: 'vec-xml-xxe',
+      vector: 'Project `.gpr` / XML External Entity (XXE) Credential Exfiltration',
+      cveOrCwe: 'CWE-611 / XML Parser DTD External Entity Resolution',
+      attackSurface: 'Importing untrusted Ghidra `.gar` archives or XML symbol tables',
+      mitigationControl:
+        'Disallowed DTD/external entities at parser level; stripped all host environment variables and secrets before headless invocation.',
+      status: 'HARDENED' as const,
+    },
+  ],
+  sandboxPolicy: {
+    seccompProfile: 'seccomp-strict-ghidra-decompiler-v4.json (392 syscalls blocked)',
+    jvmRmiStatus: 'DISABLED_HARD_BLOCKED' as const,
+    networkNamespace: 'AIRGAPPED_NULL_NETNS' as const,
+    pluginSignatureEnforcement: 'FIPS_204_ML_DSA_87_REQUIRED' as const,
+    triEngineConsensusQuorum: '2-of-3 Independent Lifters (Rizin + angr + Isolated Ghidra)' as const,
+  },
+  hardenedArchitectureSnippet: `# Zero-Trust Ghidra Compromise Containment & Multi-Engine BFT Verification
+# Mitigates compromised Ghidra decompiler binaries, poisoned SLEIGH specs, and JVM RMI RCE
+import hashlib
+import subprocess
+import oqs
+
+class HardenedBftBinaryAuditor:
+    """
+    Never trusts Ghidra output alone. Executes Ghidra inside an air-gapped,
+    network-isolated seccomp microVM and cross-verifies its Control Flow Graph (CFG)
+    against independent Rizin (ESIL) and angr (VEX IR) lifters signed with ML-DSA-87.
+    """
+    def __init__(self):
+        self.signer = oqs.Signature("ML-DSA-87")
+        self.pub_key = self.signer.generate_keypair()
+
+    def verify_sleigh_integrity(self, sleigh_spec_bytes: bytes, signature: bytes, trusted_pub: bytes) -> bool:
+        with oqs.Signature("ML-DSA-87") as verifier:
+            return verifier.verify(sleigh_spec_bytes, signature, trusted_pub)
+
+    def run_bft_multi_lifter_quorum(self, binary_digest: str, ghidra_cfg_hash: str, rizin_esil_hash: str, angr_vex_hash: str) -> dict:
+        quorum_match = (rizin_esil_hash == angr_vex_hash)
+        ghidra_compromised = (ghidra_cfg_hash != rizin_esil_hash)
+        attestation_payload = f"{binary_digest}:{rizin_esil_hash}:QUORUM={quorum_match}".encode()
+        sig = self.signer.sign(attestation_payload)
+        return {
+            "binary_sha256": binary_digest,
+            "ghidra_quarantined": ghidra_compromised,
+            "trusted_consensus_hash": rizin_esil_hash,
+            "fips_204_mldsa87_attestation": sig.hex()[:64]
+        }`,
+};
+
 export function runSimulatedGhidraAnalysis(presetId: string = 'rsa-montgomery'): GhidraAnalysisResult {
   const preset = SAMPLE_GHIDRA_PRESETS.find((p) => p.id === presetId) || SAMPLE_GHIDRA_PRESETS[0];
 
+  const isCompromiseSim = presetId === 'compromised-ghidra-poison';
+
   return {
-    binaryName: `${preset.id}.elf`,
+    binaryName: isCompromiseSim ? 'poisoned_sleigh_decompiler_target.elf' : `${preset.id}.elf`,
     architecture: preset.arch,
     format: preset.format,
     sha256: '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08',
@@ -454,62 +544,645 @@ export function runSimulatedGhidraAnalysis(presetId: string = 'rsa-montgomery'):
         pcode: ['CBRANCH (ram, 0x004011b5, 8), (register, ZF, 1)'],
       },
     ],
-    detectedVulnerabilities: preset.vulnerabilities,
+    detectedVulnerabilities: [
+      ...preset.vulnerabilities,
+      {
+        type: 'Ghidra Decompiler Supply-Chain & P-Code Cross-Verification',
+        severity: 'HIGH',
+        cwe: 'CWE-345',
+        description:
+          'Ghidra SRE output was treated as untrusted due to active Ghidra compromise alert. Output was cross-verified via 3-way BFT consensus against Radare2/Rizin ESIL and angr VEX IR inside an air-gapped seccomp-bpf microVM.',
+        location: 'Decompiler Pipeline Quorum Verifier @ BFT-Gate-01',
+        quantumImplication:
+          'Prevents a compromised decompiler from masking classical RSA/ECC backdoors or injecting trojanized P-Code during FIPS 203/204 migration.',
+      },
+    ],
     analysisMetrics: {
       functionsCount: preset.symbols.filter((s) => s.type === 'Function').length,
       basicBlocksCount: 14,
       cyclomaticComplexity: 4,
       analysisTimeMs: 142,
     },
+    compromiseContainment: {
+      ghidraTrustStatus: 'COMPROMISED_QUARANTINED',
+      decompilerBftConsensus: [
+        {
+          engine: 'Ghidra SRE (Untrusted Sandbox)',
+          ssaHash: 'sha3_256:e4b89a1c02f9d881... (Quarantined MicroVM)',
+          status: 'TAMPER_DETECTED_POISONED_PCODE',
+          divergenceNotes:
+            'Detected anomalous SLEIGH P-Code rule attempting to suppress CWE-327 RSA-2048 warning; overridden by BFT quorum.',
+        },
+        {
+          engine: 'Radare2 / Rizin',
+          ssaHash: 'sha3_256:7c91f44b882019ae... (Canonical ESIL)',
+          status: 'BYZANTINE_QUORUM_MATCH',
+          divergenceNotes: 'Independent ESIL lifter confirmed exact CFG and timing branch at 0x004011a9.',
+        },
+        {
+          engine: 'angr / BinaryNinja',
+          ssaHash: 'sha3_256:7c91f44b882019ae... (Canonical VEX IR)',
+          status: 'BYZANTINE_QUORUM_MATCH',
+          divergenceNotes: 'Symbolic VEX IR matches Rizin ESIL 100%; attested with ML-DSA-87.',
+        },
+        {
+          engine: 'LLVM-MC Lifter',
+          ssaHash: 'sha3_256:7c91f44b882019ae... (Canonical LLVM IR)',
+          status: 'VERIFIED',
+          divergenceNotes: 'Zero-trust reference disassembly verified.',
+        },
+      ],
+      activeCountermeasures: [
+        'Ephemeral Firecracker MicroVM + seccomp-bpf Syscall Jail',
+        'Air-Gapped Null Network Namespace (Java RMI 13100-13102 Blocked)',
+        '3-Way BFT Multi-Lifter Consensus (Rizin + angr + LLVM-MC override)',
+        'Mandatory NIST FIPS 204 ML-DSA-87 Signature Check on SLEIGH Specs',
+      ],
+      pqcAttestationSignature:
+        'FIPS-204-ML-DSA-87:9a8f4c210e77b3d18c44e9201a55f80c3b77d2190f4e88a1c6623d90b11e44f2',
+    },
   };
 }
 
 export const SAMPLE_WALKOFF_PLAYBOOK: WalkoffPlaybook = {
-  id: 'playbook-pqc-containment',
-  title: 'Automated Post-Quantum Harvest-Now-Decrypt-Later Containment (WALKOFF SOAR)',
-  trigger: 'SIEM Alert: Detection of Classical RSA-2048 Ingress on Critical Telemetry Port',
+  id: 'playbook-ghidra-compromise-containment',
+  title: 'Zero-Trust Ghidra Compromise Containment & BFT Decompiler Quorum (WALKOFF SOAR)',
+  trigger: 'CRITICAL ALERT: Ghidra Decompiler / SLEIGH Supply-Chain Compromise Detected',
   description:
-    'NSA WALKOFF workflow coordinating Ghidra headless binary inspection, Timely telemetry querying, and automated SIMP crypto policy enforcement.',
+    'Hardened NSA WALKOFF workflow isolating compromised Ghidra instances into air-gapped seccomp microVMs, revoking Java RMI network bindings, and enforcing 3-way Byzantine Fault Tolerant (BFT) binary lifting consensus.',
   nodes: [
     {
       id: 'node-1',
-      title: 'Ingest Ingress PCAP & Binary Payload',
-      app: 'NiFi Pipeline',
-      action: 'Extract raw executable attachment and TLS handshake metadata',
+      title: 'Quarantine Compromised Ghidra Worker & Block Java RMI',
+      app: 'Ghidra Quarantine Sandbox',
+      action: 'Sever ports 13100-13102, mount read-only squashfs, and enforce seccomp-bpf syscall jail',
       status: 'success',
-      outputSnippet: 'Extracted payload SHA256: 9f86d081... TLS Cipher: ECDHE-RSA-AES256-GCM-SHA384 (Deprecated)',
+      outputSnippet: 'Isolated Ghidra PID inside null netns Firecracker microVM. Blocked 392 dangerous syscalls.',
     },
     {
       id: 'node-2',
-      title: 'Execute Ghidra Headless Decompilation',
-      app: 'Ghidra Headless',
-      action: 'Run automated Ghidra script to inspect crypto primitives and Montgomery loops',
+      title: 'Execute 3-Way BFT Multi-Engine Lifter Consensus',
+      app: 'Multi-Engine BFT Lifter',
+      action: 'Cross-verify Ghidra P-Code against independent Radare2/Rizin ESIL, angr VEX IR, and LLVM-MC',
       status: 'success',
-      outputSnippet: 'Decompiler confirmed RSA-2048 discrete log vulnerability (CWE-327). 0 post-quantum primitives.',
+      outputSnippet: 'Detected poisoned SLEIGH rule in Ghidra output; overridden by 3-of-4 Rizin + angr + LLVM quorum.',
     },
     {
       id: 'node-3',
-      title: 'Query Timely Time-Series Metric Anomaly',
-      app: 'Timely Metrics',
-      action: 'Evaluate egress traffic volume to detect bulk encrypted data exfiltration (HNDL activity)',
+      title: 'Verify SLEIGH & Plugin Signatures with FIPS 204 ML-DSA-87',
+      app: 'NiFi Pipeline',
+      action: 'Inspect cryptographic hashes and post-quantum signatures of all processor .sla modules',
       status: 'success',
-      outputSnippet: 'Accumulo cell query returned 4.2 GB bulk payload transfer to untrusted ASN within 10 minutes.',
+      outputSnippet: 'Quarantined unsigned Jython extension; re-pinned verified ML-DSA-87 signed processor specs.',
     },
     {
       id: 'node-4',
-      title: 'Enforce SIMP Host Hardening Rule',
+      title: 'Enforce SIMP Host Hardening & SELinux Mandatory Containment',
       app: 'SIMP Hardening',
-      action: 'Push Puppet policy update-crypto-policies --set FIPS:CNSA to isolate classical TLS endpoints',
+      action: 'Push Puppet SELinux policy `simp_ghidra_sandbox_t` and `FIPS:CNSA` across all analysis nodes',
       status: 'success',
-      outputSnippet: 'Applied FIPS:CNSA configuration on 18 core clusters. Enforced ML-KEM-768 hybrid requirement.',
+      outputSnippet: 'Applied SELinux mandatory access control and FIPS:CNSA crypto policy across 18 analysis clusters.',
     },
     {
       id: 'node-5',
-      title: 'Revoke Classical X.509 Certificates',
+      title: 'Rotate Attestation Keys & Seal CBOM Ledger',
       app: 'SOAR Containment',
-      action: 'Issue CRL revocation for compromised RSA leaf keys and notify Security Operations Center',
+      action: 'Re-sign verified binary CBOMs using hardware-backed ML-DSA-87 and close containment ticket',
       status: 'success',
-      outputSnippet: 'Revocation broadcast complete. Automated incident ticket #NSA-SOAR-2026-881 closed.',
+      outputSnippet: 'Zero-Trust BFT Decompiler Architecture active. Incident #NSA-CIRT-2026-GHIDRA-ZT sealed.',
     },
   ],
 };
+
+// ============================================================================
+// GHIDRA DEFENSIVE DECEPTION & TELEMETRY HONEYPOTS
+// ============================================================================
+
+export let GHIDRA_HONEYPOTS: GhidraHoneypot[] = [
+  {
+    id: 'hp-rmi-decoy',
+    name: 'Ghidra Server Java RMI Decoy Listener',
+    type: 'RMI_SERVER_DECOY',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: 'Port 13100-13102 (Java RMI ghidra.server.GetServerInfo)',
+    telemetryPort: 13100,
+    tripCount: 3,
+    lastTrippedAt: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    mitreDefendTactic: 'Decoy Environment (D3-DE)',
+    mitreAttackTechnique: 'T1584 - Compromise Infrastructure / T1210 - Exploitation of Remote Services',
+    canaryTokenSignature: 'CANARY-RMI-JVM-TOKEN-7719B-FIPS204',
+    description: 'High-interaction fake Ghidra collaboration server. Emulates Java RMI registry endpoint to capture deserialization payloads, unauthorized project clone attempts, and attacker C2 scanners.',
+    defensiveActionOnTrigger: 'Automated eBPF netfilter socket sever, attacker IP drop in null netns, and forensic memory dump of connection attempt.',
+  },
+  {
+    id: 'hp-canary-binary-cnsa',
+    name: 'Canary Binary Trap (CNSA-Quantum-Keyloader.elf)',
+    type: 'CANARY_BINARY_TRAP',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: '/var/ghidra/analysis_queue/cnsa_topsecret_mlkem_keyloader.elf',
+    decoyPath: '/var/ghidra/analysis_queue/cnsa_topsecret_mlkem_keyloader.elf',
+    tripCount: 1,
+    lastTrippedAt: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
+    mitreDefendTactic: 'Canary File / Decoy Asset (D3-CF)',
+    mitreAttackTechnique: 'T1005 - Data from Local System / T1552 - Unsecured Credentials',
+    canaryTokenSignature: 'CANARY-ELF-HASH-8842-MLDSA87-WATERMARK',
+    description: 'Decoy compiled ELF binary with simulated FIPS 203 ML-KEM private key material and unique cryptographic watermarks planted in Ghidra batch analysis intake.',
+    defensiveActionOnTrigger: 'Alerts SOC immediately when decompiled or parsed; identifies compromised Ghidra scripts scanning local storage for cryptographic secrets.',
+  },
+  {
+    id: 'hp-sleigh-tamper',
+    name: 'Poisoned SLEIGH Decoy Processor Spec',
+    type: 'SLEIGH_SPEC_DECOY',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: '/opt/ghidra/Ghidra/Processors/ARM/data/languages/armv9_crypto_decoy.sla',
+    decoyPath: '/opt/ghidra/Ghidra/Processors/ARM/data/languages/armv9_crypto_decoy.sla',
+    tripCount: 0,
+    mitreDefendTactic: 'File Integrity Monitoring / Decoy Resource (D3-FIM)',
+    mitreAttackTechnique: 'T1554 - Compromise Host Software Binary / T1055 - Process Injection',
+    canaryTokenSignature: 'SLEIGH-SPEC-INTEGRITY-MLDSA-99411',
+    description: 'Tripwire processor definition file with cryptographic canary hashes. Detects trojanized extensions or adversaries attempting to modify opcode semantics.',
+    defensiveActionOnTrigger: 'Triggers instant BFT lifter quorum override, rolls back to read-only squashfs, and reports file tamper to WALKOFF SOAR.',
+  },
+  {
+    id: 'hp-cred-breadcrumb',
+    name: 'Admin Credential Breadcrumb Trap',
+    type: 'CREDENTIAL_BREADCRUMB',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: '~/.ghidra/.ghidra_11.2_PUBLIC/ghidra_server_admin_creds.xml',
+    decoyPath: '~/.ghidra/.ghidra_11.2_PUBLIC/ghidra_server_admin_creds.xml',
+    tripCount: 2,
+    lastTrippedAt: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
+    mitreDefendTactic: 'Decoy Credentials (D3-DC)',
+    mitreAttackTechnique: 'T1552.001 - Credentials In Files / T1083 - File and Directory Discovery',
+    canaryTokenSignature: 'BREADCRUMB-CANARY-CREDS-XML-5502A',
+    description: 'Decoy configuration file containing high-value honeypot credentials for internal Ghidra repositories. Monitored via Linux eBPF inotify hook.',
+    defensiveActionOnTrigger: 'Instant process termination (SIGKILL) of accessing PID, credential rotation alert dispatched to Active Directory / Kerberos.',
+  },
+  {
+    id: 'hp-dns-beacon',
+    name: 'Network Egress Decoy Beacon Token',
+    type: 'NETWORK_BEACON_TRAP',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: 'pqc-cnsa-telemetry.mil.canary-token.local (DNS / UDP 53)',
+    tripCount: 1,
+    lastTrippedAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    mitreDefendTactic: 'Network Traffic Deception (D3-NTD)',
+    mitreAttackTechnique: 'T1048 - Exfiltration Over Alternative Protocol / T1071 - Application Layer Protocol',
+    canaryTokenSignature: 'DNS-CANARY-TOKEN-PQC-901844',
+    description: 'Embedded canary hostnames in sample Ghidra Python scripts. If an adversary or compromised plugin attempts exfiltration, DNS queries trigger an instant alarm.',
+    defensiveActionOnTrigger: 'Internal DNS sinkhole activation, perimeter firewall drop rule pushed via API, workstation network interface severed.',
+  },
+];
+
+export let GHIDRA_HONEYPOT_EVENTS: HoneypotTelemetryEvent[] = [
+  {
+    id: 'evt-hp-1001',
+    honeypotId: 'hp-dns-beacon',
+    honeypotName: 'Network Egress Decoy Beacon Token',
+    timestamp: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    severity: 'CRITICAL',
+    attackerSignature: {
+      sourceIp: '198.51.100.72',
+      sourcePort: 49182,
+      payloadFingerprint: 'DNS-QUERY: A? pqc-cnsa-telemetry.mil.canary-token.local',
+      attemptedAction: 'Out-of-band DNS Exfiltration Probe from compromised Ghidra Jython runtime',
+      userAgentOrTool: 'Python-urllib/3.10 GhidraScriptWorker',
+      targetedAsset: 'pqc-cnsa-telemetry.mil.canary-token.local',
+    },
+    telemetryDetails: 'Compromised Ghidra script attempted DNS resolution of decoy canary token. Query trapped by internal DNS sinkhole.',
+    containmentTriggered: true,
+    mitigationTaken: 'Air-gapped null netns enforced; isolated Ghidra worker process (PID 48190); alert relayed to CISA COUN7ER & WALKOFF SOAR.',
+  },
+  {
+    id: 'evt-hp-1002',
+    honeypotId: 'hp-cred-breadcrumb',
+    honeypotName: 'Admin Credential Breadcrumb Trap',
+    timestamp: new Date(Date.now() - 8 * 60 * 1000).toISOString(),
+    severity: 'HIGH',
+    attackerSignature: {
+      sourceIp: '203.0.113.45',
+      sourcePort: 38290,
+      payloadFingerprint: 'INOTIFY_ACCESS: read() on ~/.ghidra/.ghidra_11.2_PUBLIC/ghidra_server_admin_creds.xml',
+      attemptedAction: 'Credential harvesting from Ghidra user profile directory',
+      userAgentOrTool: 'cat / bash credential search loop',
+      targetedAsset: '~/.ghidra/.ghidra_11.2_PUBLIC/ghidra_server_admin_creds.xml',
+    },
+    telemetryDetails: 'Unauthorized process attempted to read decoy Ghidra admin credentials XML. Tripwire inotify sensor alerted security engine.',
+    containmentTriggered: true,
+    mitigationTaken: 'eBPF process kill signal sent; decoy credential usage flagged across Kerberos/LDAP audit logs.',
+  },
+  {
+    id: 'evt-hp-1003',
+    honeypotId: 'hp-rmi-decoy',
+    honeypotName: 'Ghidra Server Java RMI Decoy Listener',
+    timestamp: new Date(Date.now() - 14 * 60 * 1000).toISOString(),
+    severity: 'CRITICAL',
+    attackerSignature: {
+      sourceIp: '198.51.100.198',
+      sourcePort: 54110,
+      payloadFingerprint: 'JAVA-RMI-INVOKE: rmi://0.0.0.0:13100/GhidraServer [Magic AC ED 00 05 ObjectInputStream]',
+      attemptedAction: 'Java ObjectInputStream Remote Code Execution (RCE) deserialization probe',
+      userAgentOrTool: 'ysoserial CommonsCollections6 / JNDIExploit',
+      targetedAsset: 'Port 13100 GhidraServer RMI Registry',
+    },
+    telemetryDetails: 'Adversary sent serialized Java exploit payload to decoy Ghidra Server RMI port. Decoy listener captured bytecode without execution.',
+    containmentTriggered: true,
+    mitigationTaken: 'eBPF netfilter dropped TCP handshake; IP added to automated border blocklist; payload archived for malware analysis.',
+  },
+  {
+    id: 'evt-hp-1004',
+    honeypotId: 'hp-canary-binary-cnsa',
+    honeypotName: 'Canary Binary Trap (CNSA-Quantum-Keyloader.elf)',
+    timestamp: new Date(Date.now() - 42 * 60 * 1000).toISOString(),
+    severity: 'MEDIUM',
+    attackerSignature: {
+      sourceIp: '192.0.2.89',
+      sourcePort: 42100,
+      payloadFingerprint: 'ELF_PARSE: DWARF section scan for watermark CANARY-ELF-HASH-8842',
+      attemptedAction: 'Headless batch scraper indexing cryptographic keys from analysis intake queue',
+      userAgentOrTool: 'ghidra-headless -import -scriptPath /tmp/scrape.py',
+      targetedAsset: '/var/ghidra/analysis_queue/cnsa_topsecret_mlkem_keyloader.elf',
+    },
+    telemetryDetails: 'Canary binary decompilation triggered unique embedded watermark beacon. Worker PID logged.',
+    containmentTriggered: true,
+    mitigationTaken: 'Decompiler execution flagged as untrusted; output rejected by 3-Way BFT consensus engine.',
+  },
+];
+
+export function getGhidraHoneypots(): GhidraHoneypot[] {
+  return GHIDRA_HONEYPOTS;
+}
+
+export function getGhidraHoneypotEvents(): HoneypotTelemetryEvent[] {
+  return GHIDRA_HONEYPOT_EVENTS;
+}
+
+export function simulateAdversaryProbe(
+  honeypotId: string = 'hp-rmi-decoy',
+  attackerIp?: string
+): { honeypot: GhidraHoneypot; event: HoneypotTelemetryEvent } {
+  const hp = GHIDRA_HONEYPOTS.find((h) => h.id === honeypotId) || GHIDRA_HONEYPOTS[0];
+  const now = new Date().toISOString();
+
+  hp.status = 'TRIPPED_ALARM';
+  hp.tripCount += 1;
+  hp.lastTrippedAt = now;
+
+  const simulatedIp =
+    attackerIp ||
+    `198.51.100.${Math.floor(Math.random() * 200) + 20}`;
+
+  let attemptedAction = 'Adversary probe detected on decoy surface';
+  let payloadFingerprint = `PROBE-PAYLOAD-${Date.now().toString(16).toUpperCase()}`;
+  let userAgentOrTool = 'Adversary Automated Scanner';
+  let severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' = 'HIGH';
+  let mitigation = 'Automated zero-trust containment applied.';
+
+  if (hp.type === 'RMI_SERVER_DECOY') {
+    severity = 'CRITICAL';
+    attemptedAction = 'Adversary injected Java RMI deserialization payload targeting Ghidra Server 13100';
+    payloadFingerprint = 'JAVA-RMI-DESER: [AC ED 00 05] ysoserial CommonsCollections payload';
+    userAgentOrTool = 'JNDIExploit / GhidraServerExploiter v2.4';
+    mitigation = 'eBPF dropped connection, isolated port, and logged attacker payload.';
+  } else if (hp.type === 'CANARY_BINARY_TRAP') {
+    severity = 'HIGH';
+    attemptedAction = 'Unauthorized decompilation and extraction of Canary CNSA binary';
+    payloadFingerprint = `WATERMARK-TRIGGER: ${hp.canaryTokenSignature}`;
+    userAgentOrTool = 'Headless Ghidra Analyzer Python Script';
+    mitigation = 'Revoked analysis token; BFT consensus quarantined tainted decompiler output.';
+  } else if (hp.type === 'SLEIGH_SPEC_DECOY') {
+    severity = 'CRITICAL';
+    attemptedAction = 'Adversary attempted write/modify on SLEIGH opcode decoder specification';
+    payloadFingerprint = 'SLEIGH-TAMPER: SHA256 mismatch detected in .sla rule table';
+    userAgentOrTool = 'Malicious Ghidra Native Plugin Extension';
+    mitigation = 'Rollback to signed FIPS 204 ML-DSA-87 specification; isolated container rootfs.';
+  } else if (hp.type === 'CREDENTIAL_BREADCRUMB') {
+    severity = 'HIGH';
+    attemptedAction = 'Adversary read decoy administrative credentials from user profile';
+    payloadFingerprint = 'BREADCRUMB-ACCESS: inotify IN_ACCESS triggered';
+    userAgentOrTool = 'Exfiltration curl / python daemon';
+    mitigation = 'Killed process UID via SIGKILL; blacklisted attacker source.';
+  } else if (hp.type === 'NETWORK_BEACON_TRAP') {
+    severity = 'CRITICAL';
+    attemptedAction = 'Adversary triggered out-of-band network beacon query from container';
+    payloadFingerprint = `DNS-TRIGGER: ${hp.canaryTokenSignature}.canary-token.local`;
+    userAgentOrTool = 'cURL / DNS exfiltration channel';
+    mitigation = 'Severed network namespace to NULL_NETNS; triggered perimeter firewall rule.';
+  }
+
+  const newEvent: HoneypotTelemetryEvent = {
+    id: `evt-hp-${Date.now()}`,
+    honeypotId: hp.id,
+    honeypotName: hp.name,
+    timestamp: now,
+    severity,
+    attackerSignature: {
+      sourceIp: simulatedIp,
+      sourcePort: Math.floor(Math.random() * 30000) + 30000,
+      payloadFingerprint,
+      attemptedAction,
+      userAgentOrTool,
+      targetedAsset: hp.decoySurface,
+    },
+    telemetryDetails: `Adversary interaction captured by defensive decoy ${hp.name}. No production assets exposed.`,
+    containmentTriggered: true,
+    mitigationTaken: mitigation,
+  };
+
+  GHIDRA_HONEYPOT_EVENTS = [newEvent, ...GHIDRA_HONEYPOT_EVENTS.slice(0, 49)];
+
+  return { honeypot: hp, event: newEvent };
+}
+
+export function deployHoneypotTrap(trapData: Partial<GhidraHoneypot>): GhidraHoneypot {
+  const newTrap: GhidraHoneypot = {
+    id: `hp-${Date.now()}`,
+    name: trapData.name || 'Custom Defensive Honeypot Decoy',
+    type: trapData.type || 'CANARY_BINARY_TRAP',
+    status: 'ACTIVE_LISTENING',
+    decoySurface: trapData.decoySurface || `/analysis_queue/canary_decoy_${Date.now()}.bin`,
+    tripCount: 0,
+    mitreDefendTactic: trapData.mitreDefendTactic || 'Decoy Asset (D3-CF)',
+    mitreAttackTechnique: trapData.mitreAttackTechnique || 'T1005 - Data from Local System',
+    canaryTokenSignature: `CANARY-CUSTOM-${Math.random().toString(36).substring(2, 8).toUpperCase()}-MLDSA`,
+    description: trapData.description || 'Defensive honeypot decoy deployed to detect adversary discovery and tampering in Ghidra environment.',
+    defensiveActionOnTrigger: trapData.defensiveActionOnTrigger || 'Immediate worker PID quarantine and eBPF netfilter drop.',
+  };
+
+  GHIDRA_HONEYPOTS.push(newTrap);
+  return newTrap;
+}
+
+export function resetHoneypotAlarms(): { success: boolean; message: string } {
+  GHIDRA_HONEYPOTS = GHIDRA_HONEYPOTS.map((hp) => ({
+    ...hp,
+    status: 'ACTIVE_LISTENING' as const,
+  }));
+  return { success: true, message: 'All honeypot tripwires re-armed to ACTIVE_LISTENING' };
+}
+
+export function getGhidraCompromiseHardeningStatus(): GhidraCompromiseHardeningStatus {
+  return GHIDRA_COMPROMISE_HARDENING_STATUS;
+}
+
+// ============================================================================
+// ZERO TRUST ALL-LEVELS HARDENING & INSIDER THREAT / COMPROMISED PERSONNEL
+// ============================================================================
+
+export let ZERO_TRUST_GLOBAL_STATUS: ZeroTrustGlobalStatus = {
+  incidentId: 'NSA-ZT-INSIDER-CONTAINMENT-2026',
+  threatLevel: 'DEFCON-1 INSIDER THREAT ACTIVE',
+  twoPersonIntegrityEnforced: true,
+  singleAdminAccessBlocked: true,
+  microVMConfidentialComputingEnforced: true,
+  allPersonnelImplicitTrustRevoked: true,
+  activeQuarantinedPersonnelCount: 3,
+  pillarsHardenedCount: 6,
+  totalPillars: 6,
+  lastLockdownTimestamp: new Date().toISOString(),
+};
+
+export let ZERO_TRUST_PILLAR_CONTROLS: ZeroTrustPillarControl[] = [
+  {
+    id: 'zt-pillar-identity',
+    pillar: 'IDENTITY',
+    title: 'Revocation of Implicit Trust & Two-Person Rule (M-of-N Quorum)',
+    standardReference: 'NIST SP 800-207 Section 2.1 / NSA Zero Trust User Pillar Advancing Maturity',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'Zero single-person administrative privileges. All cryptographic key exports, decompiler binary updates, and SLEIGH commits require 2-of-3 independent ML-DSA-87 cryptographic signatures. Ephemeral access tokens expire after 15 minutes.',
+    insiderThreatMitigation:
+      'Prevents compromised NSA engineers from modifying cryptographic baselines or suppressing decompilation vulnerabilities unilaterally.',
+  },
+  {
+    id: 'zt-pillar-device',
+    pillar: 'DEVICE',
+    title: 'Hardware-Rooted TPM 2.0 PCR Sealing & MicroVM Confidential Jails',
+    standardReference: 'NSA Advancing Zero Trust Maturity: Device Pillar / DoD ZTA 2.0',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'All analysis workstations isolated inside ephemeral Firecracker microVMs with AMD SEV-SNP hardware memory encryption. Host OS read-only squashfs with blocked ptrace, execve, and raw socket creation.',
+    insiderThreatMitigation:
+      'A compromised analyst with physical or shell access cannot dump volatile memory or execute unverified debugging hooks on Ghidra processes.',
+  },
+  {
+    id: 'zt-pillar-network',
+    pillar: 'NETWORK',
+    title: 'Microsegmentation & Mutual TLS with NIST FIPS 203 ML-KEM-1024',
+    standardReference: 'NIST SP 800-207 Section 3.1 / NSA CSI Deploying Zero Trust Network Architecture',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'Lateral movement completely severed. All inter-analyst network paths dropped. Intra-agency traffic requires Mutual TLS 1.3 with FIPS 203 ML-KEM-1024 and FIPS 204 ML-DSA-87. Default-deny eBPF kernel packet filters.',
+    insiderThreatMitigation:
+      'Compromised personnel cannot probe neighboring workstations, scan internal repositories, or exfiltrate binary corpora across subnets.',
+  },
+  {
+    id: 'zt-pillar-application',
+    pillar: 'APPLICATION',
+    title: 'Byzantine Fault Tolerant (BFT) 3-of-4 Multi-Engine Lifter Consensus',
+    standardReference: 'NSA Zero Trust Application Pillar / CNSA 2.0 High-Assurance Binary Auditing',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'Ghidra decompilation output is cross-verified against independent Radare2/Rizin (ESIL), angr (VEX IR), and LLVM-MC lifters. Any single-engine divergence triggers an automated freeze and forensic review.',
+    insiderThreatMitigation:
+      'Neutralizes backdoors, falsified P-Code translations, or poisoned SLEIGH processor specs injected by rogue engineering personnel.',
+  },
+  {
+    id: 'zt-pillar-data',
+    pillar: 'DATA',
+    title: 'Cryptographically Chained Append-Only Audit Ledger (ML-DSA-87)',
+    standardReference: 'DoD Zero Trust Data Pillar / FIPS 140-3 Hardware Audit Log Integrity',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'Every decompiler execution, CBOM generation, and cryptographic assessment is committed to an append-only SHA-384 Merkle chain signed with quantum-resistant ML-DSA-87. Tampering breaks the immutable hash link.',
+    insiderThreatMitigation:
+      'Compromised personnel cannot delete, backdate, or alter audit logs to cover unauthorized access or data exfiltration.',
+  },
+  {
+    id: 'zt-pillar-visibility',
+    pillar: 'VISIBILITY',
+    title: 'Insider Threat Deception Grid, Canary Repositories & Real-Time EBPF Telemetry',
+    standardReference: 'CISA / NSA Insider Threat Mitigation Guide / MITRE D3FEND Decoy Environment',
+    status: 'ENFORCED',
+    enforcementMechanism:
+      'High-interaction decoy credentials (~/.ghidra/ghidra_server_admin_creds.xml) and canary repos deployed. Any unauthorized directory browsing or credential harvesting triggers instant eBPF SIGKILL and SOC alert.',
+    insiderThreatMitigation:
+      'Trips and fingerprints compromised personnel immediately upon attempting unauthorized lateral discovery.',
+  },
+];
+
+export let COMPROMISED_PERSONNEL_ROSTER: CompromisedPersonnelRecord[] = [
+  {
+    id: 'NSA-OP-9014',
+    callsign: 'SPECTRE-LEAD',
+    name: 'Operator 9014 (SRE Senior Engineer)',
+    clearanceLevel: 'TS/SCI with Counterintelligence Polygraph',
+    assignedDivision: 'Cryptanalysis & SRE Directorate (Ghidra Engineering)',
+    compromiseIndicator:
+      'Attempted to bypass 3-Way BFT Lifter Quorum by pushing unverified SLEIGH .sla specification with altered ML-KEM scalar multiplication constants.',
+    containmentStatus: 'QUARANTINED_NULL_NETNS',
+    twoPersonRuleRequired: true,
+    hardwareTokenRevoked: true,
+    quarantinedAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'NSA-ENG-2204',
+    callsign: 'CIPHER-VAL',
+    name: 'Engineer 2204 (Processor Spec Developer)',
+    clearanceLevel: 'TS/SCI with Full Scope Polygraph',
+    assignedDivision: 'Advanced Network Operations / Firmware Auditing',
+    compromiseIndicator:
+      'Accessed decoy administrative credential breadcrumb (~/.ghidra/ghidra_server_admin_creds.xml) outside scheduled operational maintenance window.',
+    containmentStatus: 'CREDENTIALS_REVOKED',
+    twoPersonRuleRequired: true,
+    hardwareTokenRevoked: true,
+    quarantinedAt: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
+  },
+  {
+    id: 'NSA-CTR-7712',
+    callsign: 'KESTREL-DEV',
+    name: 'Contractor 7712 (Systems Integration Lead)',
+    clearanceLevel: 'Top Secret / Special Access Program (SAP)',
+    assignedDivision: 'Defense Infrastructure / Avionics Gateway Bridge',
+    compromiseIndicator:
+      'Anomalous outbound DNS exfiltration attempt targeting unauthorized external IP, trapped by Zero Trust perimeter egress sinkhole.',
+    containmentStatus: 'HONEYPOT_MONITORED',
+    twoPersonRuleRequired: true,
+    hardwareTokenRevoked: true,
+    quarantinedAt: new Date(Date.now() - 210 * 60 * 1000).toISOString(),
+  },
+];
+
+export let TWO_PERSON_REQUESTS: TwoPersonAuthorizationRequest[] = [
+  {
+    id: 'tpi-req-101',
+    action: 'Commit Hardened FIPS 204 ML-DSA-87 SLEIGH Processor Module',
+    requesterId: 'NSA-AUDITOR-01',
+    requesterName: 'Lead Cryptanalyst Vance',
+    approver1Id: 'NSA-DIRECTOR-02',
+    approver1Sig: 'SIG-MLDSA87-0x98A1...F044',
+    status: 'PENDING_DUAL_AUTH',
+    targetAsset: '/opt/ghidra/Ghidra/Processors/ARM/data/languages/armv9_crypto.sla',
+    pqcAttestationToken: 'PQC-TPI-TOKEN-7719-MLKEM',
+  },
+  {
+    id: 'tpi-req-102',
+    action: 'Rotate F-22 Avionics Master Rekey Root Keys',
+    requesterId: 'NSA-AVIONICS-04',
+    requesterName: 'Avionics Crypto Officer Chen',
+    approver1Id: 'NSA-DIRECTOR-02',
+    approver1Sig: 'SIG-MLDSA87-0x44B2...A109',
+    approver2Id: 'NSA-SECURITY-CHIEF-01',
+    approver2Sig: 'SIG-MLDSA87-0x1198...C881',
+    status: 'APPROVED_RATIFIED',
+    targetAsset: 'F-22 CIP-1/CIP-2 Tactical IFDL Key Schedule',
+    pqcAttestationToken: 'PQC-TPI-TOKEN-9041-CNSA2',
+  },
+];
+
+export function getZeroTrustGlobalStatus(): ZeroTrustGlobalStatus {
+  return ZERO_TRUST_GLOBAL_STATUS;
+}
+
+export function getZeroTrustPillarControls(): ZeroTrustPillarControl[] {
+  return ZERO_TRUST_PILLAR_CONTROLS;
+}
+
+export function getCompromisedPersonnelRoster(): CompromisedPersonnelRecord[] {
+  return COMPROMISED_PERSONNEL_ROSTER;
+}
+
+export function getTwoPersonRequests(): TwoPersonAuthorizationRequest[] {
+  return TWO_PERSON_REQUESTS;
+}
+
+export function enforceGlobalZeroTrustLockdown(): {
+  status: string;
+  timestamp: string;
+  actionsExecuted: string[];
+} {
+  ZERO_TRUST_GLOBAL_STATUS = {
+    ...ZERO_TRUST_GLOBAL_STATUS,
+    threatLevel: 'DEFCON-1 ZERO-TRUST ALL-LEVELS HARDENED',
+    twoPersonIntegrityEnforced: true,
+    singleAdminAccessBlocked: true,
+    microVMConfidentialComputingEnforced: true,
+    allPersonnelImplicitTrustRevoked: true,
+    lastLockdownTimestamp: new Date().toISOString(),
+  };
+
+  COMPROMISED_PERSONNEL_ROSTER = COMPROMISED_PERSONNEL_ROSTER.map((p) => ({
+    ...p,
+    containmentStatus: 'QUARANTINED_NULL_NETNS' as const,
+    hardwareTokenRevoked: true,
+    twoPersonRuleRequired: true,
+  }));
+
+  return {
+    status: 'GLOBAL_ZERO_TRUST_ENFORCED',
+    timestamp: new Date().toISOString(),
+    actionsExecuted: [
+      'Revoked implicit trust for all human personnel across all security classifications',
+      'Enforced mandatory Two-Person Rule (2-of-3 M-of-N Quorum) on all cryptographic and code modifications',
+      'Terminated unverified analyst sessions and isolated workstations in null netns microVMs',
+      'Hardware TPM 2.0 PCR re-attestation enforced with 15-minute token rotation',
+      'Severed all lateral network paths between analyst clusters via eBPF kernel firewall',
+      'Chained all active audit trails with FIPS 204 ML-DSA-87 tamper-evident signatures',
+    ],
+  };
+}
+
+export function quarantinePersonnel(
+  personnelId: string,
+  reason: string
+): { success: boolean; record: CompromisedPersonnelRecord } {
+  let record = COMPROMISED_PERSONNEL_ROSTER.find((p) => p.id === personnelId);
+  if (!record) {
+    record = {
+      id: personnelId,
+      callsign: `SUSPECT-${Date.now().toString().slice(-4)}`,
+      name: `Analyst ${personnelId}`,
+      clearanceLevel: 'TS/SCI (Suspended)',
+      assignedDivision: 'Under Active Counterintelligence Triage',
+      compromiseIndicator: reason,
+      containmentStatus: 'QUARANTINED_NULL_NETNS',
+      twoPersonRuleRequired: true,
+      hardwareTokenRevoked: true,
+      quarantinedAt: new Date().toISOString(),
+    };
+    COMPROMISED_PERSONNEL_ROSTER.unshift(record);
+  } else {
+    record.containmentStatus = 'QUARANTINED_NULL_NETNS';
+    record.hardwareTokenRevoked = true;
+    record.compromiseIndicator = reason;
+  }
+
+  ZERO_TRUST_GLOBAL_STATUS.activeQuarantinedPersonnelCount =
+    COMPROMISED_PERSONNEL_ROSTER.filter((p) => p.containmentStatus !== 'UNDER_SURVEILLANCE').length;
+
+  return { success: true, record };
+}
+
+export function approveTwoPersonAuth(
+  requestId: string,
+  approverId: string,
+  approverName: string
+): { success: boolean; request: TwoPersonAuthorizationRequest } {
+  const req = TWO_PERSON_REQUESTS.find((r) => r.id === requestId);
+  if (!req) {
+    throw new Error('Authorization request not found');
+  }
+
+  if (!req.approver1Id) {
+    req.approver1Id = approverId;
+    req.approver1Sig = `SIG-MLDSA87-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+    req.status = 'PENDING_DUAL_AUTH';
+  } else if (!req.approver2Id && req.approver1Id !== approverId) {
+    req.approver2Id = approverId;
+    req.approver2Sig = `SIG-MLDSA87-${Math.random().toString(16).slice(2, 10).toUpperCase()}`;
+    req.status = 'APPROVED_RATIFIED';
+  }
+
+  return { success: true, request: req };
+}
+

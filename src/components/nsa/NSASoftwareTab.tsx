@@ -20,13 +20,20 @@ import {
   ArrowRight,
   Search,
   Filter,
+  Radio,
+  UserX,
+  Users,
+  Lock,
 } from 'lucide-react';
 import {
   NSARepository,
   GhidraAnalysisResult,
+  GhidraCompromiseHardeningStatus,
   WalkoffPlaybook,
 } from '../../types/nsaSoftware';
 import { nsaService } from '../../services/nsaService';
+import { GhidraHoneypotTelemetry } from './GhidraHoneypotTelemetry';
+import { ZeroTrustAllLevelsEnforcer } from './ZeroTrustAllLevelsEnforcer';
 
 interface NSASoftwareTabProps {
   onLoadCodeToPipeline?: (code: string) => void;
@@ -36,20 +43,31 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
   onLoadCodeToPipeline,
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'ghidra' | 'catalog' | 'walkoff' | 'simp'
-  >('ghidra');
+    | 'zero-trust-all-levels'
+    | 'ghidra-containment'
+    | 'honeypots'
+    | 'ghidra'
+    | 'catalog'
+    | 'walkoff'
+    | 'simp'
+  >('zero-trust-all-levels');
 
   const [repositories, setRepositories] = useState<NSARepository[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Ghidra State
+  // Ghidra & Hardening State
   const [ghidraPreset, setGhidraPreset] = useState<string>('rsa-montgomery');
   const [ghidraResult, setGhidraResult] = useState<GhidraAnalysisResult | null>(null);
+  const [hardeningStatus, setHardeningStatus] =
+    useState<GhidraCompromiseHardeningStatus | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [activeGhidraPane, setActiveGhidraPane] = useState<
-    'decompiler' | 'disassembly' | 'pcode' | 'symbols' | 'vulnerabilities'
-  >('decompiler');
+    'bft-consensus' | 'decompiler' | 'disassembly' | 'pcode' | 'symbols' | 'vulnerabilities'
+  >('bft-consensus');
+  const [microVmEnforced, setMicroVmEnforced] = useState<boolean>(true);
+  const [rmiHardBlocked, setRmiHardBlocked] = useState<boolean>(true);
+  const [bftQuorumRequired, setBftQuorumRequired] = useState<boolean>(true);
 
   // WALKOFF State
   const [walkoffPlaybook, setWalkoffPlaybook] = useState<WalkoffPlaybook | null>(null);
@@ -68,6 +86,7 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
   useEffect(() => {
     nsaService.getRepositories().then(setRepositories).catch(console.error);
     nsaService.runGhidraAnalysis('rsa-montgomery').then(setGhidraResult).catch(console.error);
+    nsaService.getGhidraHardeningStatus().then(setHardeningStatus).catch(console.error);
     nsaService.getWalkoffPlaybook().then(setWalkoffPlaybook).catch(console.error);
   }, []);
 
@@ -122,6 +141,59 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Critical Incident Alert Banner: Ghidra Compromised -> Zero-Trust Containment Active */}
+      <div className="p-4 rounded-xl border border-rose-500/60 bg-gradient-to-r from-rose-950/70 via-zinc-950 to-emerald-950/40 flex flex-col lg:flex-row lg:items-center justify-between gap-4 shadow-lg">
+        <div className="flex items-start gap-3">
+          <div className="w-9 h-9 rounded-lg bg-rose-500/20 border border-rose-500/50 flex items-center justify-center text-rose-400 shrink-0 mt-0.5">
+            <ShieldAlert className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-600 text-white uppercase">
+                THREAT ADVISORY: GHIDRA COMPROMISED
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-600 text-emerald-300">
+                CONTAINMENT: ZERO-TRUST BFT QUORUM ACTIVE
+              </span>
+              <span className="text-[11px] font-mono text-zinc-400">
+                Incident ID: {hardeningStatus?.incidentId || 'NSA-CIRT-2026-GHIDRA-ZERO-TRUST'}
+              </span>
+            </div>
+            <p className="text-xs text-zinc-200 leading-relaxed">
+              <strong>Architecture Hardened:</strong> Ghidra SRE is now treated as an <strong>untrusted, potentially trojanized binary analysis worker</strong>. Direct host execution and Java RMI (ports 13100–13102) are severed. All decompilation runs inside an ephemeral air-gapped <code className="text-cyan-300">Firecracker/seccomp-bpf</code> microVM, and P-Code/SSA outputs require <strong>3-Way Byzantine Fault Tolerant (BFT) Consensus</strong> against independent <code className="text-emerald-300">Radare2/Rizin ESIL</code> and <code className="text-emerald-300">angr VEX IR</code> lifters signed with <strong>NIST FIPS 204 ML-DSA-87</strong>.
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            onClick={() => setActiveSubTab('zero-trust-all-levels')}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-rose-600 hover:bg-rose-500 text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-rose-950/60"
+          >
+            <UserX className="w-4 h-4 animate-pulse" />
+            <span>Zero Trust Personnel Enforcer</span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('honeypots')}
+            className="px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-500 text-white transition-all cursor-pointer flex items-center gap-1.5 shadow-md shadow-purple-950/60"
+          >
+            <Radio className="w-4 h-4 animate-pulse" />
+            <span>Defensive Honeypots & Telemetry</span>
+          </button>
+
+          {hardeningStatus && onLoadCodeToPipeline && (
+            <button
+              onClick={() => onLoadCodeToPipeline(hardeningStatus.hardenedArchitectureSnippet)}
+              className="px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500 hover:bg-emerald-400 text-zinc-950 transition-all cursor-pointer flex items-center gap-1.5 shadow-md"
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Audit BFT Architecture in Pipeline</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* Header Banner */}
       <div className="p-6 rounded-2xl border border-blue-500/30 bg-gradient-to-r from-blue-950/40 via-zinc-900/80 to-slate-900/60 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -131,22 +203,22 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1.5">
                 <FolderGit2 className="w-3 h-3 text-blue-400" />
-                NSA GitHub Official Ecosystem
+                NSA Zero-Trust Hardened Ecosystem
               </span>
-              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-zinc-800 text-zinc-300 border border-zinc-700">
-                github.com/NationalSecurityAgency
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-rose-950 text-rose-300 border border-rose-700">
+                Ghidra Quarantined in MicroVM
               </span>
               <span className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-emerald-950 text-emerald-300 border border-emerald-800 flex items-center gap-1">
                 <ShieldCheck className="w-2.5 h-2.5" />
-                Apache-2.0 & Public Domain
+                FIPS 204 ML-DSA-87 SLEIGH Attestation
               </span>
             </div>
 
             <h2 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
-              National Security Agency (NSA) Software Suite
+              National Security Agency (NSA) Zero-Trust Hardened Suite
             </h2>
             <p className="text-sm text-zinc-300 max-w-3xl leading-relaxed">
-              Full integration of open-source software published by the NSA Research & Cybersecurity Directorates on GitHub. Features an interactive <strong className="text-blue-300">Ghidra SRE Decompiler Workbench</strong>, <strong className="text-cyan-300">WALKOFF SOAR</strong> incident orchestration, <strong className="text-emerald-300">SIMP</strong> host compliance profiles, and a complete catalog of official defense repositories.
+              Hardened defense architecture assuming complete supply-chain or runtime compromise of <strong className="text-rose-300">Ghidra SRE</strong>. Enforces <strong className="text-emerald-300">Multi-Engine BFT Lifter Quorum (Rizin + angr + LLVM-MC)</strong>, <strong className="text-cyan-300">WALKOFF SOAR Quarantine</strong>, and <strong className="text-blue-300">SIMP SELinux Mandatory Containment</strong>.
             </p>
           </div>
 
@@ -160,11 +232,11 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
               <ExternalLink className="w-3.5 h-3.5 text-zinc-400" />
               <span>NSA GitHub Org</span>
             </a>
-            <div className="p-3 rounded-xl border border-blue-500/30 bg-blue-950/30 flex items-center gap-3">
-              <Star className="w-4 h-4 text-amber-400 fill-amber-400" />
+            <div className="p-3 rounded-xl border border-emerald-500/30 bg-emerald-950/30 flex items-center gap-3">
+              <ShieldCheck className="w-4 h-4 text-emerald-400" />
               <div>
-                <div className="text-[10px] uppercase font-mono text-zinc-400">Total GitHub Stars</div>
-                <div className="text-sm font-bold font-mono text-zinc-100">65,000+</div>
+                <div className="text-[10px] uppercase font-mono text-zinc-400">BFT Lifter Quorum</div>
+                <div className="text-sm font-bold font-mono text-emerald-300">3-of-4 Verified</div>
               </div>
             </div>
           </div>
@@ -172,6 +244,51 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
 
         {/* Sub-Tabs Navigation */}
         <div className="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-zinc-800">
+          <button
+            onClick={() => setActiveSubTab('zero-trust-all-levels')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'zero-trust-all-levels'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
+                : 'bg-zinc-900/70 text-rose-300 hover:text-white hover:bg-zinc-800/80 border border-rose-800/60'
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>Zero Trust All-Levels Enforcer</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 border border-rose-400/30 text-rose-200">
+              INSIDER DEFENSE
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('ghidra-containment')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'ghidra-containment'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
+                : 'bg-zinc-900/70 text-rose-300 hover:text-white hover:bg-zinc-800/80 border border-rose-800/60'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Ghidra Compromise Containment & BFT Hardening</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 border border-rose-400/30 text-rose-200">
+              ZERO-TRUST
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('honeypots')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'honeypots'
+                ? 'bg-purple-600 text-white shadow-md shadow-purple-900/40'
+                : 'bg-zinc-900/70 text-purple-300 hover:text-white hover:bg-zinc-800/80 border border-purple-800/60'
+            }`}
+          >
+            <Radio className="w-3.5 h-3.5 text-purple-400" />
+            <span>Defensive Honeypots & Telemetry</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-950 border border-purple-400/30 text-purple-200">
+              CANARY GRID
+            </span>
+          </button>
+
           <button
             onClick={() => setActiveSubTab('ghidra')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
@@ -181,9 +298,9 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
             }`}
           >
             <Cpu className="w-3.5 h-3.5 text-blue-300" />
-            <span>Ghidra SRE Decompiler Workbench</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-blue-950 border border-blue-400/30 text-blue-200">
-              v11.2
+            <span>Quarantined Ghidra Workbench (BFT Attested)</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-amber-950 border border-amber-400/30 text-amber-200">
+              SANDBOXED
             </span>
           </button>
 
@@ -211,10 +328,7 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
             }`}
           >
             <GitBranch className="w-3.5 h-3.5 text-purple-300" />
-            <span>WALKOFF SOAR Orchestrator</span>
-            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-purple-950 border border-purple-400/30 text-purple-200">
-              Automated
-            </span>
+            <span>WALKOFF SOAR Quarantine Playbook</span>
           </button>
 
           <button
@@ -226,10 +340,170 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
             }`}
           >
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" />
-            <span>SIMP & OT Hardening (DISA STIG)</span>
+            <span>SIMP & SELinux Ghidra Jail (DISA STIG)</span>
           </button>
         </div>
       </div>
+
+      {/* SUB-TAB 0: Ghidra Compromise Containment & BFT Hardening Architecture */}
+      {activeSubTab === 'ghidra-containment' && hardeningStatus && (
+        <div className="space-y-6">
+          {/* Interactive Zero-Trust Hardening Controls */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="p-4 rounded-xl border border-emerald-500/40 bg-zinc-950 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold text-emerald-400 uppercase">
+                  1. Firecracker Seccomp-BPF MicroVM
+                </span>
+                <button
+                  onClick={() => setMicroVmEnforced(!microVmEnforced)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                    microVmEnforced
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-rose-600 text-white'
+                  }`}
+                >
+                  {microVmEnforced ? 'ENFORCED' : 'BYPASSED'}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Isolates Ghidra native C++ <code className="text-zinc-200">decompile</code> worker in a disposable microVM. Blocks 392 Linux syscalls (`execve`, `socket`, `connect`, `ptrace`) so a heap overflow in ELF/DWARF parsing cannot escape.
+              </p>
+              <div className="text-[11px] font-mono text-cyan-300 pt-1">
+                Profile: {hardeningStatus.sandboxPolicy.seccompProfile}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-emerald-500/40 bg-zinc-950 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold text-emerald-400 uppercase">
+                  2. Java RMI & Jython Air-Gap
+                </span>
+                <button
+                  onClick={() => setRmiHardBlocked(!rmiHardBlocked)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                    rmiHardBlocked
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-rose-600 text-white'
+                  }`}
+                >
+                  {rmiHardBlocked ? 'HARD-BLOCKED' : 'EXPOSED'}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Disables Ghidra Server collaborative RMI ports (13100–13102), runs inside an unshared <code className="text-zinc-200">AIRGAPPED_NULL_NETNS</code>, and requires <strong>FIPS 204 ML-DSA-87</strong> signatures on all SLEIGH `.sla` specs.
+              </p>
+              <div className="text-[11px] font-mono text-amber-300 pt-1">
+                Policy: {hardeningStatus.sandboxPolicy.pluginSignatureEnforcement}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-emerald-500/40 bg-zinc-950 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-mono font-bold text-emerald-400 uppercase">
+                  3. 3-Way BFT Decompiler Quorum
+                </span>
+                <button
+                  onClick={() => setBftQuorumRequired(!bftQuorumRequired)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold cursor-pointer ${
+                    bftQuorumRequired
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-rose-600 text-white'
+                  }`}
+                >
+                  {bftQuorumRequired ? 'QUORUM ACTIVE' : 'SINGLE ENGINE'}
+                </button>
+              </div>
+              <p className="text-xs text-zinc-400">
+                Prevents a compromised Ghidra binary from hiding RSA/ECC vulnerabilities or falsifying PQC audit reports by requiring AST/CFG agreement across <strong>Rizin ESIL</strong>, <strong>angr VEX IR</strong>, and <strong>LLVM-MC</strong>.
+              </p>
+              <div className="text-[11px] font-mono text-emerald-300 pt-1">
+                Quorum: {hardeningStatus.sandboxPolicy.triEngineConsensusQuorum}
+              </div>
+            </div>
+          </div>
+
+          {/* Mitigated Compromise Attack Vectors Table */}
+          <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-900/60 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Ghidra Compromise Attack Vectors & Architectural Hardening Matrix</span>
+              </h3>
+              <span className="text-xs font-mono text-emerald-400">
+                All 4 Attack Surfaces Contained
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {hardeningStatus.compromiseVectorsMitigated.map((v) => (
+                <div
+                  key={v.id}
+                  className="p-4 rounded-xl bg-zinc-950 border border-zinc-800 space-y-2"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-rose-300">{v.vector}</span>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-700 text-emerald-300 shrink-0">
+                      {v.status}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-amber-300">{v.cveOrCwe}</div>
+                  <div className="text-xs text-zinc-400">
+                    <strong className="text-zinc-200">Compromised Surface:</strong> {v.attackSurface}
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-zinc-900 border border-emerald-900/50 text-xs text-emerald-200">
+                    <strong>Hardened Mitigation:</strong> {v.mitigationControl}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Hardened BFT Multi-Lifter Python Reference Implementation */}
+          <div className="p-5 rounded-xl border border-zinc-800 bg-zinc-950 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-mono font-bold text-cyan-300 uppercase">
+                Zero-Trust BFT Binary Auditor & ML-DSA-87 SLEIGH Verifier (Python / liboqs)
+              </div>
+              <button
+                onClick={() =>
+                  handleCopy(hardeningStatus.hardenedArchitectureSnippet, 'bft_code')
+                }
+                className="px-3 py-1 rounded bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-mono text-zinc-200 flex items-center gap-1.5 cursor-pointer"
+              >
+                {copiedKey === 'bft_code' ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Copied Hardened Code</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Copy Hardened Module</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <pre className="p-4 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs font-mono text-emerald-300 overflow-x-auto leading-relaxed">
+              {hardeningStatus.hardenedArchitectureSnippet}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {/* SUB-TAB: Zero Trust All-Levels Enforcer & Insider Threat Neutralization */}
+      {activeSubTab === 'zero-trust-all-levels' && (
+        <ZeroTrustAllLevelsEnforcer
+          onNavigateToHoneypots={() => setActiveSubTab('honeypots')}
+        />
+      )}
+
+      {/* SUB-TAB: Ghidra Defensive Deception Honeypots & Real-Time Telemetry */}
+      {activeSubTab === 'honeypots' && (
+        <GhidraHoneypotTelemetry
+          onNavigateToWalkoff={() => setActiveSubTab('walkoff')}
+        />
+      )}
 
       {/* SUB-TAB 1: Ghidra SRE Decompiler Workbench */}
       {activeSubTab === 'ghidra' && (
@@ -270,16 +544,16 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
                 className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white transition-colors cursor-pointer shadow-xs disabled:opacity-50"
               >
                 <RotateCw className={`w-3.5 h-3.5 ${isAnalyzing ? 'animate-spin' : ''}`} />
-                <span>{isAnalyzing ? 'Analyzing P-Code...' : 'Re-Run Headless Pass'}</span>
+                <span>{isAnalyzing ? 'Running 3-Way BFT Lifters...' : 'Re-Run Sandboxed BFT Pass'}</span>
               </button>
               {ghidraResult && onLoadCodeToPipeline && (
                 <button
                   onClick={() => onLoadCodeToPipeline(ghidraResult.decompiledC)}
                   className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition-colors cursor-pointer shadow-xs"
-                  title="Load decompiled C code into 3-Agent PQC Migration Pipeline"
+                  title="Load BFT-verified C code into 3-Agent PQC Migration Pipeline"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  <span>Send to PQC Pipeline</span>
+                  <span>Send Verified Code to Pipeline</span>
                 </button>
               )}
             </div>
@@ -336,7 +610,17 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden shadow-2xl">
             {/* Pane Navigation Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-zinc-900 border-b border-zinc-800">
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1">
+                <button
+                  onClick={() => setActiveGhidraPane('bft-consensus')}
+                  className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
+                    activeGhidraPane === 'bft-consensus'
+                      ? 'bg-emerald-600 text-white'
+                      : 'text-emerald-400 hover:text-emerald-200 hover:bg-zinc-800'
+                  }`}
+                >
+                  3-Way BFT Lifter Quorum
+                </button>
                 <button
                   onClick={() => setActiveGhidraPane('decompiler')}
                   className={`px-3 py-1.5 rounded text-xs font-semibold transition-colors cursor-pointer ${
@@ -345,7 +629,7 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
                       : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
                   }`}
                 >
-                  Ghidra Decompiler (C-Pseudocode)
+                  Quarantined Decompiler (C-Pseudocode)
                 </button>
                 <button
                   onClick={() => setActiveGhidraPane('disassembly')}
@@ -413,11 +697,58 @@ export const NSASoftwareTab: React.FC<NSASoftwareTabProps> = ({
 
             {/* Pane Content */}
             <div className="p-4 font-mono text-xs overflow-x-auto min-h-[380px] max-h-[550px] overflow-y-auto">
+              {/* 0. 3-Way BFT Lifter Quorum */}
+              {activeGhidraPane === 'bft-consensus' && ghidraResult?.compromiseContainment && (
+                <div className="space-y-4">
+                  <div className="p-3.5 rounded-xl border border-emerald-500/40 bg-emerald-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div>
+                      <div className="text-xs font-bold text-emerald-300">
+                        Byzantine Fault Tolerant (BFT) Multi-Lifter Consensus Verification
+                      </div>
+                      <div className="text-[11px] text-zinc-400">
+                        Ghidra output is untrusted and cross-checked against independent Rizin ESIL, angr VEX IR, and LLVM-MC lifters.
+                      </div>
+                    </div>
+                    <span className="px-2.5 py-1 rounded bg-emerald-950 border border-emerald-700 text-emerald-300 text-[10px] font-bold">
+                      {ghidraResult.compromiseContainment.pqcAttestationSignature.slice(0, 36)}...
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {ghidraResult.compromiseContainment.decompilerBftConsensus.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className={`p-3.5 rounded-xl border space-y-1.5 ${
+                          item.status === 'TAMPER_DETECTED_POISONED_PCODE'
+                            ? 'border-rose-500/60 bg-rose-950/20'
+                            : 'border-emerald-500/40 bg-zinc-900/70'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-bold text-white">{item.engine}</span>
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              item.status === 'TAMPER_DETECTED_POISONED_PCODE'
+                                ? 'bg-rose-600 text-white'
+                                : 'bg-emerald-950 border border-emerald-700 text-emerald-300'
+                            }`}
+                          >
+                            {item.status}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-cyan-300">{item.ssaHash}</div>
+                        <div className="text-[11px] text-zinc-300">{item.divergenceNotes}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 1. Decompiler */}
               {activeGhidraPane === 'decompiler' && ghidraResult && (
                 <div className="space-y-2">
                   <div className="text-[11px] text-zinc-400 pb-2 border-b border-zinc-800/80 flex items-center justify-between">
-                    <span>// Ghidra Decompiler 11.2 - Intermediate SSA Synthesis</span>
+                    <span>// Quarantined Ghidra Decompiler 11.2 (Verified via Rizin + angr BFT Quorum)</span>
                     <span className="text-blue-400 font-semibold">{ghidraResult.architecture}</span>
                   </div>
                   <pre className="text-zinc-200 leading-relaxed font-mono whitespace-pre-wrap selection:bg-blue-900/60">

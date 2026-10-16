@@ -1,10 +1,10 @@
 import crypto from 'crypto';
-import {
+import type {
   GCHQRepository,
   CyberChefRecipeStep,
   CyberChefBakeResult,
   GafferGraphData,
-} from '../types/gchqSoftware.js';
+} from '../types/gchqSoftware.ts';
 
 export const GCHQ_REPOSITORIES: GCHQRepository[] = [
   {

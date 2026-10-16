@@ -1,0 +1,114 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email'])
+        && data.keys().hasOnly(['uid', 'email', 'name', 'createdAt'])
+        && data.uid is string && data.uid.size() > 0 && data.uid.size() <= 128 && data.uid == request.auth.uid
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 254
+        && (!('name' in data) || (data.name is string && data.name.size() <= 100))
+        && (!('createdAt' in data) || data.createdAt is timestamp || (data.createdAt is string && data.createdAt.size() <= 60));
+    }
+
+    function isValidSavedProject(data, userId) {
+      return data.keys().hasAll(['userId', 'projectName', 'code'])
+        && data.keys().hasOnly(['userId', 'projectName', 'code', 'cbomData', 'roadmapData', 'aikidoGrade', 'createdAt'])
+        && data.userId is string && data.userId == request.auth.uid && data.userId == userId
+        && data.projectName is string && data.projectName.size() > 0 && data.projectName.size() <= 150
+        && data.code is string && data.code.size() <= 250000
+        && (!('cbomData' in data) || (data.cbomData is string && data.cbomData.size() <= 500000))
+        && (!('roadmapData' in data) || (data.roadmapData is string && data.roadmapData.size() <= 500000))
+        && (!('aikidoGrade' in data) || (data.aikidoGrade is string && data.aikidoGrade.size() <= 50))
+        && (!('createdAt' in data) || data.createdAt is timestamp || (data.createdAt is string && data.createdAt.size() <= 60));
+    }
+
+    function isValidAuditLog(data) {
+      return data.keys().hasAll(['action'])
+        && data.keys().hasOnly(['userId', 'action', 'details', 'timestamp'])
+        && data.action is string && data.action.size() > 0 && data.action.size() <= 100
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128))
+        && (!('details' in data) || (data.details is string && data.details.size() <= 5000))
+        && (!('timestamp' in data) || data.timestamp is timestamp || (data.timestamp is string && data.timestamp.size() <= 60));
+    }
+
+    // User profile collection
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false; // Disallow querying multiple user documents directly
+
+      allow create: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming());
+
+      allow update: if isOwner(userId)
+        && isValidId(userId)
+        && isValidUser(incoming())
+        && incoming().uid == existing().uid
+        && incoming().diff(existing()).affectedKeys().hasOnly(['email', 'name']);
+
+      allow delete: if false; // Retain profile records
+
+      // User saved projects subcollection
+      match /projects/{projectId} {
+        allow get: if isOwner(userId) && isValidId(projectId);
+        allow list: if isOwner(userId);
+
+        allow create: if isOwner(userId)
+          && isValidId(projectId)
+          && isValidSavedProject(incoming(), userId);
+
+        allow update: if isOwner(userId)
+          && isValidId(projectId)
+          && isValidSavedProject(incoming(), userId)
+          && incoming().userId == existing().userId
+          && incoming().diff(existing()).affectedKeys().hasOnly(['projectName', 'code', 'cbomData', 'roadmapData', 'aikidoGrade']);
+
+        allow delete: if isOwner(userId) && isValidId(projectId);
+      }
+    }
+
+    // Cryptographic & system audit logs
+    match /auditLogs/{logId} {
+      allow get: if isSignedIn()
+        && isValidId(logId)
+        && (existing().userId == null || existing().userId == request.auth.uid);
+
+      allow list: if isSignedIn();
+
+      allow create: if isSignedIn()
+        && isValidId(logId)
+        && isValidAuditLog(incoming())
+        && (!('userId' in incoming()) || incoming().userId == request.auth.uid);
+
+      allow update: if false; // Audit logs are immutable write-once
+      allow delete: if false; // Audit logs cannot be deleted
+    }
+  }
+}

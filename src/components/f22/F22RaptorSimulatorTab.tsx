@@ -6,6 +6,7 @@ import {
   Layers,
   Terminal,
   ShieldCheck,
+  ShieldAlert,
   AlertTriangle,
   Play,
   RotateCcw,
@@ -29,6 +30,8 @@ import {
   RefreshCw,
   TrendingUp,
   Download,
+  Network,
+  Route,
 } from 'lucide-react';
 import {
   F22FlightState,
@@ -52,17 +55,43 @@ import {
   INITIAL_LATENCY_HISTORY,
   INITIAL_FORMATION_NODES,
 } from '../../data/f22SimulatorData';
+import { F22AvionicsD3Map } from './F22AvionicsD3Map';
+import { F22AvionicsStatusWidget } from './F22AvionicsStatusWidget';
+import { F22AvionicsForceGraph } from './F22AvionicsForceGraph';
+import { F22AvionicsCommunicationPathsGraph } from './F22AvionicsCommunicationPathsGraph';
+import { F22PqcPerformanceDashboard } from './F22PqcPerformanceDashboard';
+import {
+  F22ElectronicAttackHardening,
+  HardeningArchitectureConfig,
+} from './F22ElectronicAttackHardening';
+import { CbomItem } from '../../types/pqc';
+import { DefenseHoneypot } from '../defense/DefenseHoneypot';
+import { HoneypotSecurityLog } from '../../types/defenseHoneypot';
+import { subscribeToF22HoneypotTelemetry } from '../../utils/defenseHoneypotLogger';
 
 interface F22RaptorSimulatorTabProps {
   onLoadCodeToPipeline?: (code: string) => void;
+  cbomItems?: CbomItem[];
 }
 
 export const F22RaptorSimulatorTab: React.FC<F22RaptorSimulatorTabProps> = ({
   onLoadCodeToPipeline,
+  cbomItems = [],
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'cockpit' | 'architecture' | 'code' | 'bus' | 'telemetry'
-  >('cockpit');
+    'cockpit' | 'architecture' | 'avionics-status' | 'perf-dashboard' | 'ea-hardening' | 'code' | 'bus' | 'telemetry' | 'defense-honeypot'
+  >('ea-hardening');
+  const [architectureGraphView, setArchitectureGraphView] = useState<'paths' | 'force' | 'tiered'>('paths');
+
+  // F-35 Breach & Electronic Attack Mitigation State
+  const [isElectronicAttackActive, setIsElectronicAttackActive] = useState<boolean>(true);
+  const [hardeningConfig, setHardeningConfig] = useState<HardeningArchitectureConfig>({
+    pqcBusGuardian: true,
+    hudAttestedPipeline: true,
+    vmsInertialCrossCheck: true,
+    f35DataDiodeQuarantine: true,
+    cnsa2RekeyRatchet: true,
+  });
 
   // Flight State
   const [flightState, setFlightState] = useState<F22FlightState>(INITIAL_F22_FLIGHT_STATE);
@@ -126,6 +155,59 @@ export const F22RaptorSimulatorTab: React.FC<F22RaptorSimulatorTabProps> = ({
 
     return () => clearInterval(timer);
   }, [flightState.flightMode, flightState.pqcSecurity.rekeyIntervalSeconds]);
+
+  // Subscribe to real-time Defense Honeypot alerts & feed into F-22 Avionics Telemetry
+  useEffect(() => {
+    const unsubscribe = subscribeToF22HoneypotTelemetry((log) => {
+      // 1. Update CIP metrics
+      setCipMetrics((prev) => ({
+        ...prev,
+        cip1CpuUtilization: Math.min(
+          99.0,
+          Number((prev.cip1CpuUtilization + log.f22AvionicsTelemetryInjected.cip1CpuDeltaPercent).toFixed(1))
+        ),
+        trngEntropyRateGbps: Number(
+          (prev.trngEntropyRateGbps + log.f22AvionicsTelemetryInjected.trngEntropyDrawGbps).toFixed(2)
+        ),
+        fibreChannelThroughputMbps: Number((prev.fibreChannelThroughputMbps + 14.5).toFixed(1)),
+      }));
+
+      // 2. Inject bus frame into 1553 bus frames
+      const newBusFrame: MilStd1553Frame = {
+        id: `bus-hp-${Date.now()}`,
+        timestamp: new Date().toTimeString().split(' ')[0],
+        busChannel: log.f22AvionicsTelemetryInjected.busChannelAlert,
+        remoteTerminal: `RT-${log.endpointPort}`,
+        subAddress: 'SA-18 (HONEYPOT)',
+        wordCount: 32,
+        hexPayload: '08C4 FA09 1198 5164',
+        decodedMeaning: log.f22AvionicsTelemetryInjected.hudWarningMessage,
+        status: 'PQC_ENCRYPTED',
+      };
+      setBusFrames((prev) => [newBusFrame, ...prev.slice(0, 19)]);
+
+      // 3. Inject latency sample into latencyHistory
+      const newLatencySample: KeyNegotiationLatencySample = {
+        timestamp: new Date().toTimeString().split(' ')[0],
+        cycle: (latencyHistory[latencyHistory.length - 1]?.cycle || 0) + 1,
+        kemEncapMs: 0.054,
+        kemDecapMs: 0.062,
+        ifdlRttMs: 0.039,
+        totalNegotiationMs: 0.155,
+        classicalEcdhMs: 0.071,
+        algorithm: log.simulatedHandshake.negotiatedKem,
+        flightMode: flightState.flightMode,
+        jitterMicrosec: 3.4,
+        handshakeStatus: 'RATCHETED',
+      };
+      setLatencyHistory((prev) => [...prev.slice(-19), newLatencySample]);
+
+      // 4. Trigger HUD notice
+      triggerNotice(log.f22AvionicsTelemetryInjected.hudWarningMessage);
+    });
+
+    return () => unsubscribe();
+  }, [flightState.flightMode, latencyHistory]);
 
   // Live Mission Telemetry Streaming Loop (50 Hz CIP Simulation)
   useEffect(() => {
@@ -498,13 +580,64 @@ end F22_${mode}_Flight_Crypto;`;
           </div>
 
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 shrink-0">
-            <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-zinc-950/80 flex items-center gap-3">
-              <Activity className="w-4 h-4 text-emerald-400" />
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('ea-hardening')}
+              className={`p-3.5 rounded-xl border flex items-center gap-3 transition-all cursor-pointer text-left group ${
+                isElectronicAttackActive
+                  ? 'border-rose-500/60 bg-rose-950/40 hover:bg-rose-900/50'
+                  : 'border-zinc-800 bg-zinc-950/80 hover:bg-zinc-900/90'
+              }`}
+              title="F-35 Breach & Electronic Attack Mitigation Hardening Suite"
+            >
+              <Shield className={`w-4 h-4 group-hover:scale-110 transition-transform ${isElectronicAttackActive ? 'text-rose-400 animate-pulse' : 'text-emerald-400'}`} />
               <div>
-                <div className="text-[10px] uppercase font-mono text-zinc-400">Avionics System Status</div>
-                <div className="text-sm font-bold font-mono text-emerald-300">ALL SYSTEMS GO (CIP 1/2)</div>
+                <div className="text-[10px] uppercase font-mono text-zinc-400 flex items-center gap-1.5">
+                  <span>EA Threat Defense</span>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isElectronicAttackActive ? 'bg-rose-400 animate-ping' : 'bg-emerald-400'}`} />
+                </div>
+                <div className={`text-sm font-bold font-mono ${isElectronicAttackActive ? 'text-rose-300' : 'text-emerald-300'}`}>
+                  {isElectronicAttackActive ? 'ATTACK DEFENSE · ACTIVE' : 'SYSTEM HARDENED'}
+                </div>
               </div>
-            </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('perf-dashboard')}
+              className="p-3.5 rounded-xl border border-cyan-500/30 bg-zinc-950/80 flex items-center gap-3 hover:border-cyan-400 hover:bg-zinc-900/90 transition-all cursor-pointer text-left group"
+              title="View PQC Performance Dashboard (ML-KEM-768 Latency Overhead vs Classical)"
+            >
+              <TrendingUp className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="text-[10px] uppercase font-mono text-zinc-400 flex items-center gap-1.5">
+                  <span>ML-KEM-768 Overhead</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                </div>
+                <div className="text-sm font-bold font-mono text-cyan-300">
+                  PERF DASHBOARD · D3
+                </div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('avionics-status')}
+              className="p-3.5 rounded-xl border border-emerald-500/30 bg-zinc-950/80 flex items-center gap-3 hover:border-emerald-400 hover:bg-zinc-900/90 transition-all cursor-pointer text-left group"
+              title="View Live Avionics Status & FIPS 203/204 Key Negotiation Latency"
+            >
+              <Activity className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <div>
+                <div className="text-[10px] uppercase font-mono text-zinc-400 flex items-center gap-1.5">
+                  <span>Avionics System Status</span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </div>
+                <div className="text-sm font-bold font-mono text-emerald-300">
+                  ALL SYSTEMS GO · LIVE D3
+                </div>
+              </div>
+            </button>
+
             <div className="p-3.5 rounded-xl border border-emerald-500/30 bg-zinc-950/80 flex items-center gap-3">
               <Zap className="w-4 h-4 text-cyan-400" />
               <div>
@@ -714,6 +847,55 @@ end F22_${mode}_Flight_Crypto;`;
         {/* Sub-Tabs Navigation */}
         <div className="flex flex-wrap items-center gap-2 mt-6 pt-5 border-t border-zinc-800">
           <button
+            onClick={() => setActiveSubTab('ea-hardening')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'ea-hardening'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
+                : 'bg-zinc-900/70 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 border border-zinc-800'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-300" />
+            <span>F-35 EA Hardening</span>
+            <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono border ${
+              isElectronicAttackActive
+                ? 'bg-rose-950 border-rose-500/50 text-rose-200 animate-pulse'
+                : 'bg-emerald-950 border-emerald-500/50 text-emerald-200'
+            }`}>
+              {isElectronicAttackActive ? 'Attack Mitigated' : '5 Shields Ready'}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('perf-dashboard')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'perf-dashboard'
+                ? 'bg-cyan-600 text-white shadow-md shadow-cyan-900/40'
+                : 'bg-zinc-900/70 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 border border-zinc-800'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-cyan-300" />
+            <span>PQC Performance Dashboard</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-cyan-950 border border-cyan-400/30 text-cyan-200">
+              ML-KEM-768 Overhead
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveSubTab('avionics-status')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'avionics-status'
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-900/40'
+                : 'bg-zinc-900/70 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80 border border-zinc-800'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-emerald-300" />
+            <span>Avionics Status</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 border border-emerald-400/30 text-emerald-200">
+              Live D3 Widget
+            </span>
+          </button>
+
+          <button
             onClick={() => setActiveSubTab('cockpit')}
             className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
               activeSubTab === 'cockpit'
@@ -784,6 +966,21 @@ end F22_${mode}_Flight_Crypto;`;
               Live Graphs
             </span>
           </button>
+
+          <button
+            onClick={() => setActiveSubTab('defense-honeypot')}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+              activeSubTab === 'defense-honeypot'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-900/40'
+                : 'bg-zinc-900/70 text-rose-300 hover:text-white hover:bg-zinc-800/80 border border-rose-800/60'
+            }`}
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+            <span>Defense Honeypot · Decoy TLS</span>
+            <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 border border-rose-500/40 text-rose-200">
+              liboqs Grid
+            </span>
+          </button>
         </div>
       </div>
 
@@ -803,17 +1000,179 @@ end F22_${mode}_Flight_Crypto;`;
         </div>
       )}
 
+      {/* SUB-TAB: Electronic Attack Mitigation & Architecture Hardening */}
+      {activeSubTab === 'ea-hardening' && (
+        <F22ElectronicAttackHardening
+          flightState={flightState}
+          isAttackActive={isElectronicAttackActive}
+          onToggleAttack={(active) => {
+            setIsElectronicAttackActive(active);
+            triggerNotice(
+              active
+                ? 'ELECTRONIC ATTACK STIMULUS ACTIVATED: MONITORING HARDENING MITIGATION.'
+                : 'ELECTRONIC ATTACK TERMINATED: AVIONICS BUS & HUD INTEGRITY RESTORED.'
+            );
+          }}
+          hardeningConfig={hardeningConfig}
+          onUpdateHardeningConfig={setHardeningConfig}
+          onSwitchSubTab={(sub) => {
+            if (
+              sub === 'cockpit' ||
+              sub === 'bus' ||
+              sub === 'architecture' ||
+              sub === 'telemetry' ||
+              sub === 'perf-dashboard' ||
+              sub === 'avionics-status'
+            ) {
+              setActiveSubTab(sub as any);
+            }
+          }}
+        />
+      )}
+
+      {/* SUB-TAB: PQC Performance Dashboard (ML-KEM-768 Latency Overhead vs Classical) */}
+      {activeSubTab === 'perf-dashboard' && (
+        <F22PqcPerformanceDashboard
+          flightState={flightState}
+          cbomItems={cbomItems}
+          onTriggerFlightMode={handleSelectFlightMode}
+          onRekeyTrigger={() => handleForceRekey(true)}
+          onNavigateToTab={(tab) => {
+            if (tab === 'telemetry') setActiveSubTab('telemetry');
+            if (tab === 'avionics-status') setActiveSubTab('avionics-status');
+            if (tab === 'architecture') setActiveSubTab('architecture');
+          }}
+        />
+      )}
+
+      {/* SUB-TAB 0: Avionics Status Widget (D3 Live FIPS 203/204 Key Negotiation Latency) */}
+      {activeSubTab === 'avionics-status' && (
+        <F22AvionicsStatusWidget
+          flightState={flightState}
+          onTriggerFlightMode={handleSelectFlightMode}
+          onRekeyTrigger={() => handleForceRekey(true)}
+        />
+      )}
+
       {/* SUB-TAB 1: Cockpit Glass & HUD View */}
       {activeSubTab === 'cockpit' && (
         <div className="space-y-6">
+          {/* F-35 Threat & HUD Hardening Control Strip */}
+          <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono text-xs transition-all ${
+            isElectronicAttackActive
+              ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-200 shadow-md'
+                : 'border-rose-500/60 bg-rose-950/30 text-rose-200 animate-pulse'
+              : 'border-zinc-800 bg-zinc-950 text-zinc-300'
+          }`}>
+            <div className="flex items-center gap-3">
+              <ShieldAlert className={`w-5 h-5 shrink-0 ${
+                isElectronicAttackActive
+                  ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                    ? 'text-emerald-400'
+                    : 'text-rose-400 animate-bounce'
+                  : 'text-zinc-500'
+              }`} />
+              <div>
+                <div className="font-bold uppercase tracking-wider flex items-center gap-2">
+                  <span>F-35 Threat Vector & HUD Anti-Tamper Status:</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    isElectronicAttackActive
+                      ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-600'
+                        : 'bg-rose-950 text-rose-300 border border-rose-600'
+                      : 'bg-zinc-900 text-zinc-400'
+                  }`}>
+                    {isElectronicAttackActive
+                      ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                        ? 'MITIGATED (PQC ATTESTED & GROUND-TRUTH LOCKED)'
+                        : 'SPOOF ATTACK ACTIVE (CORRUPTED HUD SYMBOLOGY)'
+                      : 'NORMAL FLIGHT'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  {isElectronicAttackActive
+                    ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                      ? 'Adversary F-35 injection intercepted. HUD glass Display Verification Controller blocks unverified vectors. Pitch locked to true VMS gyros.'
+                      : 'Adversary injecting false pitch ladder (+14.2°) & phantom radar track through F-35 bridge! Click "Enable HUD Hardening" to neutralize.'
+                    : 'Simulate F-35 electronic attack to test cryptographic HUD vector attestation and VMS cross-checking.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsElectronicAttackActive(!isElectronicAttackActive)}
+                className={`px-3 py-1.5 rounded-lg font-bold transition-all cursor-pointer ${
+                  isElectronicAttackActive
+                    ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-900/40'
+                    : 'bg-zinc-800 hover:bg-zinc-700 text-rose-300 border border-rose-600/40'
+                }`}
+              >
+                {isElectronicAttackActive ? 'Halt Attack' : 'Simulate F-35 Attack'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setHardeningConfig({
+                    ...hardeningConfig,
+                    hudAttestedPipeline: !hardeningConfig.hudAttestedPipeline,
+                    vmsInertialCrossCheck: !hardeningConfig.vmsInertialCrossCheck,
+                  });
+                }}
+                className={`px-3 py-1.5 rounded-lg font-bold border transition-all cursor-pointer ${
+                  hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                    ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60 shadow-emerald-900/30'
+                    : 'bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-white'
+                }`}
+              >
+                {hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                  ? 'HUD Hardening: ENGAGED'
+                  : 'Engage HUD Hardening'}
+              </button>
+            </div>
+          </div>
+
           {/* Main Flight Display & Controls Grid */}
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
             {/* Left 7 cols: Phosphor Green Heads-Up Display (HUD) */}
-            <div className="lg:col-span-7 p-6 rounded-2xl border-2 border-emerald-500/40 bg-black shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[500px]">
+            <div className={`lg:col-span-7 p-6 rounded-2xl border-2 bg-black shadow-2xl relative overflow-hidden flex flex-col justify-between min-h-[500px] transition-all ${
+              isElectronicAttackActive
+                ? hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                  ? 'border-emerald-500/60 shadow-emerald-950/40'
+                  : 'border-rose-500/80 shadow-rose-950/40 animate-pulse'
+                : 'border-emerald-500/40'
+            }`}>
               {/* Scanline background overlay */}
               <div
                 className="absolute inset-0 pointer-events-none opacity-10 bg-[linear-gradient(rgba(18,255,0,0)_50%,rgba(0,0,0,0.8)_50%)] bg-[length:100%_4px]"
               />
+
+              {/* HUD Cryptographic Security Watermark / Alert Strip */}
+              {isElectronicAttackActive && (
+                <div className={`p-2 rounded-lg font-mono text-[10px] font-bold flex items-center justify-between mb-2 relative z-20 ${
+                  hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck
+                    ? 'bg-cyan-950/90 border border-cyan-500/50 text-cyan-300'
+                    : 'bg-rose-950/90 border border-rose-500/80 text-rose-300 animate-pulse'
+                }`}>
+                  <div className="flex items-center gap-1.5">
+                    {hardeningConfig.hudAttestedPipeline && hardeningConfig.vmsInertialCrossCheck ? (
+                      <>
+                        <Lock className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>[PQC ATTESTED: CIP-1 ML-DSA-65] · VMS RLG LOCKED (0.0° DRIFT) · F-35 VECTORS BLOCKED</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-400 animate-bounce" />
+                        <span>⚠ [EA CORRUPTION ACTIVE] · F-35 BUS INJECTION · NOSE-UP DRIFT (+14.2°) · GHOST TARGET ACTIVE</span>
+                      </>
+                    )}
+                  </div>
+                  <span className="opacity-80">50 Hz CYCLIC</span>
+                </div>
+              )}
 
               {/* Top HUD Line: Heading & Steerpoint */}
               <div className="flex items-center justify-between text-emerald-400 font-mono text-xs border-b border-emerald-500/30 pb-2 relative z-10">
@@ -848,12 +1207,27 @@ end F22_${mode}_Flight_Crypto;`;
 
                 {/* Center Pitch Ladder & Bore Sight Crosshair */}
                 <div className="relative flex flex-col items-center justify-center">
-                  {/* Pitch ladder bars */}
-                  <div className="w-48 h-0.5 bg-emerald-500/60 mb-8 relative flex items-center justify-between px-2 text-[10px] font-mono text-emerald-400">
-                    <span>+10</span>
-                    <span className="w-12 h-0.5 bg-emerald-400" />
-                    <span>+10</span>
-                  </div>
+                  {/* Pitch ladder bars with dynamic spoof offset simulation */}
+                  {isElectronicAttackActive && (!hardeningConfig.hudAttestedPipeline || !hardeningConfig.vmsInertialCrossCheck) ? (
+                    /* Corrupted Pitch Ladder with +14° Offset Warning */
+                    <div className="space-y-4 text-center">
+                      <div className="p-1 px-2 rounded bg-rose-950/80 border border-rose-500 text-rose-300 text-[10px] font-mono animate-pulse">
+                        ⚠ SPOOFED PITCH DRIFT +14.2° (F-35 INJECTION)
+                      </div>
+                      <div className="w-56 h-0.5 bg-rose-500/80 mb-4 relative flex items-center justify-between px-2 text-[10px] font-mono text-rose-400">
+                        <span>+24</span>
+                        <span className="w-16 h-0.5 bg-rose-400" />
+                        <span>+24</span>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Clean Attested Ground-Truth Ladder */
+                    <div className="w-48 h-0.5 bg-emerald-500/60 mb-8 relative flex items-center justify-between px-2 text-[10px] font-mono text-emerald-400">
+                      <span>+10</span>
+                      <span className="w-12 h-0.5 bg-emerald-400" />
+                      <span>+10</span>
+                    </div>
+                  )}
 
                   {/* Flight Path Marker (FPM) */}
                   <div className="w-10 h-10 rounded-full border-2 border-emerald-400 flex items-center justify-center relative">
@@ -862,6 +1236,18 @@ end F22_${mode}_Flight_Crypto;`;
                     <div className="absolute -right-3 top-1/2 -translate-y-1/2 w-3 h-0.5 bg-emerald-400" />
                     <div className="absolute top--3 left-1/2 -translate-x-1/2 w-0.5 h-3 bg-emerald-400" />
                   </div>
+
+                  {/* Ghost Target Injected on HUD when attack is active and unhardened */}
+                  {isElectronicAttackActive && (!hardeningConfig.hudAttestedPipeline || !hardeningConfig.f35DataDiodeQuarantine) && (
+                    <div className="absolute -top-24 left-10 p-2 border-2 border-dashed border-rose-500 text-rose-300 font-mono text-[10px] bg-rose-950/70 animate-bounce z-20">
+                      <div className="font-bold flex items-center gap-1">
+                        <AlertTriangle className="w-3 h-3 text-rose-400" />
+                        <span>GHOST-99 [F-35 SPOOF LURE]</span>
+                      </div>
+                      <div>12 NM · M 1.2 · CFIT HAZARD</div>
+                      <div className="text-[8px] text-rose-400">UNATTESTED RASTER VECTOR</div>
+                    </div>
+                  )}
 
                   <div className="w-48 h-0.5 bg-emerald-500/40 mt-8 relative flex items-center justify-between px-2 text-[10px] font-mono text-emerald-400">
                     <span>-10</span>
@@ -1249,11 +1635,100 @@ end F22_${mode}_Flight_Crypto;`;
       {/* SUB-TAB 2: Interactive CIP & Avionics Architecture */}
       {activeSubTab === 'architecture' && (
         <div className="space-y-6">
+          {/* Topology View Switcher: D3 Communication Paths Graph vs Relational Graph vs Tiered Architecture */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-950 p-2.5 rounded-xl border border-zinc-800">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+              <span className="text-zinc-500 font-semibold px-1">TOPOLOGY VIEW:</span>
+              <button
+                type="button"
+                onClick={() => setArchitectureGraphView('paths')}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 cursor-pointer transition-colors ${
+                  architectureGraphView === 'paths'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                }`}
+              >
+                <Route className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Communication Paths Graph</span>
+                <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-950 border border-emerald-400/30 text-emerald-200">
+                  ML-KEM-768 Highlighted
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setArchitectureGraphView('force')}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 cursor-pointer transition-colors ${
+                  architectureGraphView === 'force'
+                    ? 'bg-emerald-600 text-white shadow-md'
+                    : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                }`}
+              >
+                <Network className="w-3.5 h-3.5 text-cyan-300" />
+                <span>Relational Force Graph</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setArchitectureGraphView('tiered')}
+                className={`px-3 py-1.5 rounded-lg font-semibold flex items-center gap-2 cursor-pointer transition-colors ${
+                  architectureGraphView === 'tiered'
+                    ? 'bg-cyan-600 text-white shadow-md'
+                    : 'bg-zinc-900 text-zinc-400 hover:text-white border border-zinc-800'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5 text-cyan-300" />
+                <span>Tiered Bus Architecture</span>
+              </button>
+            </div>
+            <div className="text-[11px] font-mono text-zinc-500 px-2 hidden lg:block">
+              Directed D3 links & PQC-hybrid enclaves
+            </div>
+          </div>
+
+          {/* Active Topology Component */}
+          {architectureGraphView === 'paths' ? (
+            <F22AvionicsCommunicationPathsGraph
+              flightMode={flightState.flightMode}
+              onSelectSubsystem={(sub) => setSelectedSubsystem(sub)}
+              onOpenCodeView={(sub) => {
+                setSelectedSubsystem(sub);
+                setActiveSubTab('code');
+              }}
+            />
+          ) : architectureGraphView === 'force' ? (
+            <F22AvionicsForceGraph
+              flightMode={flightState.flightMode}
+              onSelectSubsystem={(sub) => setSelectedSubsystem(sub)}
+              onOpenCodeView={(sub) => {
+                setSelectedSubsystem(sub);
+                setActiveSubTab('code');
+              }}
+            />
+          ) : (
+            <F22AvionicsD3Map
+              flightMode={flightState.flightMode}
+              onSelectSubsystem={(sub) => setSelectedSubsystem(sub)}
+              onOpenCodeView={(sub) => {
+                setSelectedSubsystem(sub);
+                setActiveSubTab('code');
+              }}
+            />
+          )}
+
           <div className="p-5 rounded-xl border border-cyan-500/30 bg-cyan-950/20 space-y-2">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Layers className="w-4 h-4 text-cyan-400" />
-              Common Integrated Processor (CIP 1 & CIP 2) Core Architecture
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Layers className="w-4 h-4 text-cyan-400" />
+                Common Integrated Processor (CIP 1 & CIP 2) Core Architecture
+              </h3>
+              <button
+                type="button"
+                onClick={() => setActiveSubTab('avionics-status')}
+                className="px-3 py-1.5 rounded-lg bg-emerald-950 border border-emerald-500/40 text-emerald-300 text-xs font-mono font-semibold flex items-center gap-1.5 hover:bg-emerald-900/60 transition-colors cursor-pointer shrink-0"
+              >
+                <Activity className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Open Avionics Status Widget</span>
+              </button>
+            </div>
             <p className="text-xs text-zinc-300 max-w-3xl">
               The F-22 Raptor eliminated discrete black-box federated avionics by introducing the twin Common Integrated Processors. Signal and data processing modules communicate over high-speed 400 Mbps Fibre Channel backplanes and MIL-STD-1553B multiplex buses running 2.5 million lines of Ada 95 software.
             </p>
@@ -1441,14 +1916,66 @@ end F22_${mode}_Flight_Crypto;`;
       {/* SUB-TAB 4: MIL-STD-1553B & Telemetry Bus Monitor */}
       {activeSubTab === 'bus' && (
         <div className="space-y-6">
-          <div className="p-5 rounded-xl border border-purple-500/30 bg-purple-950/20 space-y-2">
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Activity className="w-4 h-4 text-purple-400" />
-              Live MIL-STD-1553B & Fibre Channel Bus Telemetry Stream
-            </h3>
-            <p className="text-xs text-zinc-300 max-w-3xl">
-              Real-time frame capture of command words, status words, and remote terminal communications across the F-22 flight controls, AESA radar, and post-quantum encrypted Intra-Flight Data Link.
-            </p>
+          {/* F-35 Threat & Bus Guardian Arbiter Status Banner */}
+          <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 font-mono text-xs ${
+            isElectronicAttackActive
+              ? hardeningConfig.pqcBusGuardian && hardeningConfig.f35DataDiodeQuarantine
+                ? 'border-emerald-500/50 bg-emerald-950/20 text-emerald-200'
+                : 'border-rose-500/60 bg-rose-950/30 text-rose-200 animate-pulse'
+              : 'border-purple-500/30 bg-purple-950/20 text-zinc-300'
+          }`}>
+            <div className="flex items-center gap-3">
+              <ShieldAlert className={`w-5 h-5 shrink-0 ${
+                isElectronicAttackActive
+                  ? hardeningConfig.pqcBusGuardian
+                    ? 'text-emerald-400'
+                    : 'text-rose-400 animate-bounce'
+                  : 'text-purple-400'
+              }`} />
+              <div>
+                <div className="font-bold uppercase tracking-wider flex items-center gap-2">
+                  <span>MIL-STD-1553B & Optical Bus Integrity:</span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    isElectronicAttackActive
+                      ? hardeningConfig.pqcBusGuardian
+                        ? 'bg-emerald-950 text-emerald-300 border border-emerald-600'
+                        : 'bg-rose-950 text-rose-300 border border-rose-600'
+                      : 'bg-purple-950 text-purple-300 border border-purple-800'
+                  }`}>
+                    {isElectronicAttackActive
+                      ? hardeningConfig.pqcBusGuardian
+                        ? 'PQC BUS GUARDIAN: ACTIVE (ROGUE FRAMES SHUNTED)'
+                        : 'BUS COMPROMISED (ROGUE 1553B WORDS EXECUTING)'
+                      : 'ALL CHANNELS SECURED'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  {isElectronicAttackActive
+                    ? hardeningConfig.pqcBusGuardian
+                      ? 'Hardware Bus Arbiter ASIC evaluates 64-bit FIPS 204 ML-DSA-65 MAC on each 1553B command frame. Rogue packets from F-35 bridge are shunted in <2 µs.'
+                      : 'Adversary injecting unauthenticated flight control command words from RT-14 (F-35 bridge)! Enable PQC Bus Guardian to isolate.'
+                    : 'Real-time frame capture across F-22 flight controls, AESA radar, and post-quantum Intra-Flight Data Link.'}
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setHardeningConfig({
+                  ...hardeningConfig,
+                  pqcBusGuardian: !hardeningConfig.pqcBusGuardian,
+                  f35DataDiodeQuarantine: !hardeningConfig.f35DataDiodeQuarantine,
+                });
+              }}
+              className={`px-3 py-1.5 rounded-lg font-bold border transition-all cursor-pointer shrink-0 ${
+                hardeningConfig.pqcBusGuardian
+                  ? 'bg-emerald-950 text-emerald-300 border-emerald-500/60'
+                  : 'bg-zinc-900 text-zinc-400 border-zinc-700 hover:text-white'
+              }`}
+            >
+              {hardeningConfig.pqcBusGuardian ? 'PQC Guardian: ENGAGED' : 'Engage PQC Bus Guardian'}
+            </button>
           </div>
 
           <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden">
@@ -1461,6 +1988,58 @@ end F22_${mode}_Flight_Crypto;`;
             </div>
 
             <div className="divide-y divide-zinc-900">
+              {/* If Electronic Attack is active, display the intercepted rogue frames at the top of the stream */}
+              {isElectronicAttackActive && (
+                <>
+                  <div className={`p-3.5 grid grid-cols-12 items-center text-xs font-mono transition-colors ${
+                    hardeningConfig.pqcBusGuardian ? 'bg-emerald-950/20' : 'bg-rose-950/40 animate-pulse'
+                  }`}>
+                    <span className="col-span-2 text-zinc-400">19:48:52.4</span>
+                    <span className="col-span-2 text-cyan-300 font-semibold">CH-A (MIL-1553B)</span>
+                    <span className="col-span-3 text-rose-300 font-bold">RT-14 (F-35 BRIDGE)</span>
+                    <span className="col-span-3 font-bold truncate">
+                      {hardeningConfig.pqcBusGuardian ? (
+                        <span className="text-emerald-400">0x438A: CMD_OVERRIDE_PITCH (DROPPED & QUARANTINED)</span>
+                      ) : (
+                        <span className="text-rose-400">0x438A: CMD_OVERRIDE_PITCH (+14.2° SPOOF EXEC)</span>
+                      )}
+                    </span>
+                    <span className="col-span-2 text-right">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        hardeningConfig.pqcBusGuardian
+                          ? 'bg-emerald-950 border border-emerald-500 text-emerald-300'
+                          : 'bg-rose-950 border border-rose-500 text-rose-200 animate-pulse'
+                      }`}>
+                        {hardeningConfig.pqcBusGuardian ? 'BLOCKED_INVALID_MAC' : 'UNAUTHORIZED_EXEC'}
+                      </span>
+                    </span>
+                  </div>
+
+                  <div className={`p-3.5 grid grid-cols-12 items-center text-xs font-mono transition-colors ${
+                    hardeningConfig.pqcBusGuardian ? 'bg-emerald-950/20' : 'bg-rose-950/40 animate-pulse'
+                  }`}>
+                    <span className="col-span-2 text-zinc-400">19:48:51.9</span>
+                    <span className="col-span-2 text-cyan-300 font-semibold">CH-B (MIL-1553B)</span>
+                    <span className="col-span-3 text-rose-300 font-bold">RT-14 (F-35 BRIDGE)</span>
+                    <span className="col-span-3 font-bold truncate">
+                      {hardeningConfig.pqcBusGuardian ? (
+                        <span className="text-emerald-400">0x192F: SPOOF_ALTITUDE_TAPE (DROPPED BY ARBITER)</span>
+                      ) : (
+                        <span className="text-rose-400">0x192F: SPOOF_ALTITUDE_TAPE (41,500 FT INJECTED)</span>
+                      )}
+                    </span>
+                    <span className="col-span-2 text-right">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        hardeningConfig.pqcBusGuardian
+                          ? 'bg-emerald-950 border border-emerald-500 text-emerald-300'
+                          : 'bg-rose-950 border border-rose-500 text-rose-200 animate-pulse'
+                      }`}>
+                        {hardeningConfig.pqcBusGuardian ? 'BLOCKED_ML_DSA' : 'UNAUTHORIZED_EXEC'}
+                      </span>
+                    </span>
+                  </div>
+                </>
+              )}
               {busFrames.map((frm) => (
                 <div
                   key={frm.id}
@@ -1598,6 +2177,40 @@ end F22_${mode}_Flight_Crypto;`;
                 <span>Export JSON</span>
               </button>
             </div>
+          </div>
+
+          {/* Tactical Decoy TLS Honeypot Telemetry Feeder Bar */}
+          <div className="p-3.5 rounded-xl border border-rose-500/40 bg-gradient-to-r from-rose-950/40 via-zinc-950 to-zinc-900 flex flex-col md:flex-row md:items-center justify-between gap-3 shadow-md">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-rose-500/20 border border-rose-500/40 flex items-center justify-center text-rose-400 shrink-0">
+                <ShieldAlert className="w-4 h-4 animate-pulse" />
+              </div>
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold font-mono text-white">
+                    Avionics Decoy TLS Honeypot Feed Active
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono font-bold bg-emerald-950 border border-emerald-600 text-emerald-300">
+                    5 Decoys (Ports 8443–12443)
+                  </span>
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-purple-950 border border-purple-800 text-purple-300">
+                    liboqs FIPS 203/204
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-300">
+                  Adversary connection attempts & quantum downgrade exploits intercept on decoy TLS listeners and stream directly into F-22 CIP-1 vector bus.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('defense-honeypot')}
+              className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-rose-600 hover:bg-rose-500 text-white transition-all cursor-pointer flex items-center gap-1.5 shrink-0 shadow-xs"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Inspect Honeypot Telemetry</span>
+            </button>
           </div>
 
           {/* Core Hardware KPI Cards Grid */}
@@ -1750,6 +2363,14 @@ end F22_${mode}_Flight_Crypto;`;
                 <p className="text-xs text-zinc-400 mt-1">
                   Dynamic round-trip latency comparing <strong>NIST FIPS 203 ML-KEM</strong> against classical non-quantum X25519 ECDH baseline during multi-ship IFDL synchronization.
                 </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveSubTab('perf-dashboard')}
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-mono font-bold bg-cyan-950 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-200 transition-colors cursor-pointer"
+                >
+                  <TrendingUp className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Open Dedicated ML-KEM-768 Latency Overhead Dashboard (D3) →</span>
+                </button>
               </div>
 
               {/* Line Visibility Filters */}
@@ -2170,6 +2791,14 @@ end F22_${mode}_Flight_Crypto;`;
             </div>
           </div>
         </div>
+      )}
+
+      {/* SUB-TAB: Defense Honeypot & Decoy TLS Endpoints with liboqs */}
+      {activeSubTab === 'defense-honeypot' && (
+        <DefenseHoneypot
+          onNavigateToF22Telemetry={() => setActiveSubTab('telemetry')}
+          isEmbeddedInF22={true}
+        />
       )}
     </div>
   );

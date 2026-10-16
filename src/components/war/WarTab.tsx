@@ -47,6 +47,8 @@ import {
   KillChainPhase,
   StrikeMissionExecution,
 } from '../../types/war';
+import { ThreatIntelligenceTicker } from './ThreatIntelligenceTicker';
+import { ThreatIntelligenceMatrixView } from './ThreatIntelligenceMatrixView';
 
 interface WarTabProps {
   onLoadWarPresetToPipeline?: () => void;
@@ -54,7 +56,7 @@ interface WarTabProps {
 
 export const WarTab: React.FC<WarTabProps> = ({ onLoadWarPresetToPipeline }) => {
   const [activeSubTab, setActiveSubTab] = useState<
-    'killchain' | 'arsenal' | 'software' | 'cyber-injection' | 'trajectory'
+    'killchain' | 'arsenal' | 'software' | 'cyber-injection' | 'trajectory' | 'threat-intel'
   >('killchain');
 
   // Interactive Kill Chain State
@@ -370,6 +372,28 @@ export const WarTab: React.FC<WarTabProps> = ({ onLoadWarPresetToPipeline }) => 
         </div>
       </div>
 
+      {/* Real-Time Cyberwar Threat Intelligence Live CVE Ticker */}
+      <ThreatIntelligenceTicker
+        selectedTarget={selectedTarget}
+        onSelectTargetById={(targetId) => {
+          setSelectedTargetId(targetId);
+          const tgt = STRIKE_TARGETS.find((t) => t.id === targetId);
+          if (tgt) {
+            setSelectedWeaponId(tgt.recommendedWeaponId);
+            setSelectedSoftwareId(tgt.recommendedSoftwareId);
+          }
+        }}
+        onNavigateToCyberConsole={(payloadId) => {
+          setActiveSubTab('cyber-injection');
+          if (payloadId) {
+            const payload = cyberPayloads.find((p) => p.id === payloadId);
+            if (payload) {
+              handleTriggerCyberPayload(payload);
+            }
+          }
+        }}
+      />
+
       {/* Navigation Sub-Tabs */}
       <div className="flex items-center gap-2 border-b border-zinc-800 pb-2 overflow-x-auto scrollbar-none">
         <button
@@ -383,6 +407,22 @@ export const WarTab: React.FC<WarTabProps> = ({ onLoadWarPresetToPipeline }) => 
         >
           <Target className="w-4 h-4 text-red-400" />
           <span>F2T2EA Automated Strike Kill Chain</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('threat-intel')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeSubTab === 'threat-intel'
+              ? 'bg-red-950 border border-red-600 text-red-300 shadow-md'
+              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+          }`}
+        >
+          <Radio className="w-4 h-4 text-rose-500 animate-pulse" />
+          <span>Threat Intelligence & CVE Matrix</span>
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 text-rose-300 border border-rose-800">
+            LIVE CVE
+          </span>
         </button>
 
         <button
@@ -1159,6 +1199,30 @@ export const WarTab: React.FC<WarTabProps> = ({ onLoadWarPresetToPipeline }) => 
             </div>
           </div>
         </div>
+      )}
+
+      {/* SUB-TAB 6: THREAT INTELLIGENCE & CVE MATRIX */}
+      {activeSubTab === 'threat-intel' && (
+        <ThreatIntelligenceMatrixView
+          selectedTarget={selectedTarget}
+          onSelectTarget={(targetId) => {
+            setSelectedTargetId(targetId);
+            const tgt = STRIKE_TARGETS.find((t) => t.id === targetId);
+            if (tgt) {
+              setSelectedWeaponId(tgt.recommendedWeaponId);
+              setSelectedSoftwareId(tgt.recommendedSoftwareId);
+            }
+          }}
+          onArmCyberPayload={(payloadId) => {
+            setActiveSubTab('cyber-injection');
+            if (payloadId) {
+              const payload = cyberPayloads.find((p) => p.id === payloadId);
+              if (payload) {
+                handleTriggerCyberPayload(payload);
+              }
+            }
+          }}
+        />
       )}
     </div>
   );

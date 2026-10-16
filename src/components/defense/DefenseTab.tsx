@@ -51,6 +51,7 @@ import {
   ClassificationLevel,
   DefenseMissionSuite,
 } from '../../types/defense';
+import { DefenseHoneypot } from './DefenseHoneypot';
 
 interface DefenseTabProps {
   onLoadDefensePresetToPipeline?: () => void;
@@ -63,7 +64,7 @@ export const DefenseTab: React.FC<DefenseTabProps> = ({
   const [selectedDomain, setSelectedDomain] = useState<DefenseDomain | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeSubTab, setActiveSubTab] = useState<
-    'launcher' | 'matrix' | 'sensor-to-shooter' | 'palantir-aip' | 'crypto-gateway'
+    'launcher' | 'matrix' | 'sensor-to-shooter' | 'palantir-aip' | 'crypto-gateway' | 'defense-honeypot'
   >('launcher');
 
   // Mission Suite Launcher State
@@ -444,6 +445,22 @@ export const DefenseTab: React.FC<DefenseTabProps> = ({
         >
           <Lock className="w-4 h-4 text-emerald-400" />
           <span>TACLANE Type 1 & Tactical SDR Gateway</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveSubTab('defense-honeypot')}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
+            activeSubTab === 'defense-honeypot'
+              ? 'bg-rose-950 border border-rose-600 text-rose-300 shadow-md'
+              : 'text-zinc-400 hover:text-rose-300 hover:bg-zinc-900'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4 text-rose-400" />
+          <span>Defense Honeypot · Decoy TLS</span>
+          <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-rose-950 border border-rose-500/40 text-rose-200">
+            F-22 Telemetry
+          </span>
         </button>
       </div>
 
@@ -1446,6 +1463,11 @@ export const DefenseTab: React.FC<DefenseTabProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* SUB-TAB 5: DEFENSE HONEYPOT & DECOY TLS WITH LIBOQS */}
+      {activeSubTab === 'defense-honeypot' && (
+        <DefenseHoneypot />
       )}
 
       {/* INSPECTED PRODUCT API MODAL */}

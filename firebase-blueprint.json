@@ -1,0 +1,126 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile authenticated via Firebase Authentication",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth unique identifier",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "User verified email address",
+          "maxLength": 254
+        },
+        "name": {
+          "type": "string",
+          "description": "Display name of the user",
+          "maxLength": 100
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of profile creation"
+        }
+      },
+      "required": ["uid", "email"]
+    },
+    "SavedProject": {
+      "title": "SavedProject",
+      "description": "PQC migration pipeline analysis project, CBOM metadata and roadmap",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "Firebase Auth UID of the owner",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "projectName": {
+          "type": "string",
+          "description": "Descriptive title of the project",
+          "maxLength": 150
+        },
+        "code": {
+          "type": "string",
+          "description": "Source code analyzed or migrated",
+          "maxLength": 250000
+        },
+        "cbomData": {
+          "type": "string",
+          "description": "Serialized Cryptographic Bill of Materials",
+          "maxLength": 500000
+        },
+        "roadmapData": {
+          "type": "string",
+          "description": "Serialized migration strategy and recommendations",
+          "maxLength": 500000
+        },
+        "aikidoGrade": {
+          "type": "string",
+          "description": "Aikido automated security grading score",
+          "maxLength": 50
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of project creation"
+        }
+      },
+      "required": ["userId", "projectName", "code"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "Cryptographic compliance, telemetry, and security event log entry",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "UID of the user or system actor",
+          "maxLength": 128
+        },
+        "action": {
+          "type": "string",
+          "description": "Action executed",
+          "maxLength": 100
+        },
+        "details": {
+          "type": "string",
+          "description": "Contextual details or audit findings",
+          "maxLength": 5000
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of audit event"
+        }
+      },
+      "required": ["action"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Root user profile document indexed by UID"
+    },
+    "/users/{userId}/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/SavedProject"
+      },
+      "description": "Saved PQC migration and avionics projects owned by user"
+    },
+    "/auditLogs/{logId}": {
+      "schema": {
+        "$ref": "#/entities/AuditLog"
+      },
+      "description": "Security and cryptographic audit records"
+    }
+  }
+}

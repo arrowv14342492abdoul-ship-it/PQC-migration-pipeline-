@@ -1,9 +1,9 @@
-import {
+import type {
   IsraelCyberRepository,
   CdmControlItem,
   CertIlThreatAlert,
   TraceeEbpfEvent,
-} from '../types/israelCyberSoftware.js';
+} from '../types/israelCyberSoftware.ts';
 
 export const ISRAEL_CYBER_REPOSITORIES: IsraelCyberRepository[] = [
   {

@@ -1,69 +1,28 @@
 import React, { useState } from 'react';
 import { CbomItem } from '../types/pqc';
 import { AlertTriangle, Download, Filter, ShieldCheck, ShieldAlert, Cpu } from 'lucide-react';
+import { exportCycloneDx16Cbom } from '../utils/cycloneDxExport';
 
 interface CbomTableProps {
   items: CbomItem[];
   rawAuditReport?: string;
+  projectName?: string;
 }
 
-export const CbomTable: React.FC<CbomTableProps> = ({ items, rawAuditReport }) => {
+export const CbomTable: React.FC<CbomTableProps> = ({ items, rawAuditReport, projectName = 'PQC-Cryptographic-Codebase' }) => {
   const [filterRisk, setFilterRisk] = useState<string>('ALL');
 
   const filteredItems = items.filter((item) => {
     if (filterRisk === 'ALL') return true;
-    return item.riskTier === filterRisk;
+    if (item.riskTier === filterRisk) return true;
+    if (filterRisk === 'CRITICAL' && item.quantumVulnerability === 'shor-critical') return true;
+    if (filterRisk === 'HIGH' && item.quantumVulnerability === 'grover-moderate') return true;
+    if (filterRisk === 'MEDIUM' && item.quantumVulnerability === 'quantum-safe') return true;
+    return false;
   });
 
   const downloadCbomJson = () => {
-    const cbomPackage = {
-      bomFormat: 'CycloneDX',
-      specVersion: '1.6',
-      serialNumber: `urn:uuid:${crypto.randomUUID()}`,
-      version: 1,
-      metadata: {
-        timestamp: new Date().toISOString(),
-        component: {
-          name: 'audited-cryptographic-codebase',
-          type: 'application',
-        },
-        tools: [
-          {
-            vendor: 'NIST PQC Migration Pipeline',
-            name: 'PQC Auditor Agent',
-            version: '2026.1',
-          },
-        ],
-      },
-      cryptographicAssets: items.map((item, idx) => ({
-        id: `crypto-asset-${idx + 1}`,
-        algorithm: item.algorithm,
-        primitive: item.primitive,
-        vulnerabilities: [
-          {
-            name: item.vulnerability,
-            severity: item.riskTier.toLowerCase(),
-          },
-        ],
-        quantumSecurity: {
-          riskTier: item.riskTier,
-          nistMigrationTarget: item.nistReplacement,
-          fipsStandard: item.fipsStandard,
-        },
-        locations: item.locations,
-        keyLength: item.classicalKeySize,
-      })),
-    };
-
-    const blob = new Blob([JSON.stringify(cbomPackage, null, 2)], {
-      type: 'application/json',
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'cryptographic-bill-of-materials.cbom.json';
-    a.click();
-    URL.revokeObjectURL(url);
+    exportCycloneDx16Cbom(projectName, items);
   };
 
   if (!items || items.length === 0) {
@@ -118,55 +77,73 @@ export const CbomTable: React.FC<CbomTableProps> = ({ items, rawAuditReport }) =
         <table className="w-full text-left text-xs border-collapse">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900/70 text-zinc-400 font-mono text-[11px]">
-              <th className="py-2.5 px-3.5 font-medium">Primitive / Algorithm</th>
+              <th className="py-2.5 px-3.5 font-medium">Primitive / Asset</th>
               <th className="py-2.5 px-3.5 font-medium">Quantum Threat</th>
-              <th className="py-2.5 px-3.5 font-medium">Risk Tier</th>
-              <th className="py-2.5 px-3.5 font-medium">NIST Replacement</th>
-              <th className="py-2.5 px-3.5 font-medium">FIPS Standard</th>
+              <th className="py-2.5 px-3.5 font-medium">NIST & Hybrid Target</th>
+              <th className="py-2.5 px-3.5 font-medium">Overhead & Sizes</th>
               <th className="py-2.5 px-3.5 font-medium">Location</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-850">
             {filteredItems.map((item, idx) => {
-              const isCritical = item.riskTier === 'CRITICAL';
-              const isHigh = item.riskTier === 'HIGH';
+              const isShorCritical =
+                item.quantumVulnerability === 'shor-critical' ||
+                item.riskTier === 'CRITICAL';
+              const isGroverModerate =
+                item.quantumVulnerability === 'grover-moderate' ||
+                item.riskTier === 'HIGH';
 
               return (
                 <tr
-                  key={idx}
+                  key={item.id || idx}
                   className="hover:bg-zinc-900/40 transition-colors group"
                 >
                   <td className="py-3 px-3.5">
                     <div className="font-semibold text-zinc-100 flex items-center gap-1.5">
-                      {item.algorithm}
+                      {item.primitive || item.algorithm}
+                      {item.cycloneDx?.algorithmProperties?.nistQuantumSecurityLevel && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-mono font-bold bg-emerald-950 border border-emerald-800 text-emerald-300">
+                          NIST L{item.cycloneDx.algorithmProperties.nistQuantumSecurityLevel}
+                        </span>
+                      )}
                     </div>
-                    <div className="text-[11px] text-zinc-400">
-                      {item.primitive}
-                      {item.classicalKeySize && ` · ${item.classicalKeySize}`}
-                    </div>
+                    {item.bomRef && (
+                      <div className="text-[10px] font-mono text-zinc-500 truncate max-w-xs" title={item.bomRef}>
+                        {item.bomRef}
+                      </div>
+                    )}
+                    {item.cycloneDx?.oid && (
+                      <div className="text-[10px] font-mono text-cyan-400/80">
+                        OID: {item.cycloneDx.oid}
+                      </div>
+                    )}
                   </td>
 
                   <td className="py-3 px-3.5 text-zinc-300 max-w-xs">
-                    <div className="line-clamp-2">{item.vulnerability}</div>
-                  </td>
-
-                  <td className="py-3 px-3.5">
-                    <span
-                      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
-                        isCritical
-                          ? 'bg-rose-950/70 border border-rose-800/80 text-rose-300'
-                          : isHigh
-                          ? 'bg-amber-950/70 border border-amber-800/80 text-amber-300'
-                          : 'bg-zinc-800 text-zinc-300'
-                      }`}
-                    >
-                      {isCritical ? (
-                        <ShieldAlert className="w-3 h-3 text-rose-400" />
-                      ) : (
-                        <AlertTriangle className="w-3 h-3 text-amber-400" />
-                      )}
-                      {item.riskTier}
-                    </span>
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium ${
+                          isShorCritical
+                            ? 'bg-rose-950/70 border border-rose-800/80 text-rose-300'
+                            : isGroverModerate
+                            ? 'bg-amber-950/70 border border-amber-800/80 text-amber-300'
+                            : 'bg-emerald-950/70 border border-emerald-800 text-emerald-300'
+                        }`}
+                      >
+                        {isShorCritical ? (
+                          <ShieldAlert className="w-3 h-3 text-rose-400" />
+                        ) : (
+                          <AlertTriangle className="w-3 h-3 text-amber-400" />
+                        )}
+                        {item.quantumVulnerability || (isShorCritical ? 'shor-critical' : 'grover-moderate')}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-zinc-400 line-clamp-2">
+                      {item.vulnerability ||
+                        (isShorCritical
+                          ? "Shor's algorithm integer factorization / discrete log poly-time break"
+                          : "Grover's algorithm speedup")}
+                    </div>
                   </td>
 
                   <td className="py-3 px-3.5">
@@ -174,19 +151,50 @@ export const CbomTable: React.FC<CbomTableProps> = ({ items, rawAuditReport }) =
                       <ShieldCheck className="w-3 h-3" />
                       {item.nistReplacement}
                     </div>
-                    {item.postQuantumKeySize && (
-                      <div className="text-[11px] text-zinc-400">
+                    {item.hybridRecommendation && (
+                      <div className="text-[11px] font-mono text-cyan-300 mt-0.5">
+                        Hybrid: {item.hybridRecommendation}
+                      </div>
+                    )}
+                    {item.fipsStandard && (
+                      <div className="text-[10px] font-mono text-zinc-500">
+                        {item.fipsStandard}
+                      </div>
+                    )}
+                  </td>
+
+                  <td className="py-3 px-3.5 font-mono text-[11px] text-zinc-300">
+                    {item.estimatedCycleOverheadPct !== undefined && (
+                      <div className="text-amber-300">
+                        +{item.estimatedCycleOverheadPct}% cycle overhead
+                      </div>
+                    )}
+                    {item.pubkeySizeBytes !== undefined && item.pubkeySizeBytes > 0 && (
+                      <div className="text-zinc-400 text-[10px]">
+                        PubKey: {item.pubkeySizeBytes}B
+                      </div>
+                    )}
+                    {item.ciphertextOrSigSizeBytes !== undefined && (
+                      <div className="text-zinc-400 text-[10px]">
+                        Cipher/Sig: {item.ciphertextOrSigSizeBytes}B
+                      </div>
+                    )}
+                    {item.postQuantumKeySize && !item.pubkeySizeBytes && (
+                      <div className="text-zinc-400 text-[10px]">
                         {item.postQuantumKeySize}
                       </div>
                     )}
                   </td>
 
-                  <td className="py-3 px-3.5 font-mono text-zinc-300">
-                    {item.fipsStandard}
-                  </td>
-
                   <td className="py-3 px-3.5 font-mono text-[11px] text-zinc-400">
-                    {item.locations}
+                    {item.fileLocation ? (
+                      <div>
+                        <span className="text-zinc-300">{item.fileLocation}</span>
+                        {item.lineNumber && <span className="text-emerald-400">:{item.lineNumber}</span>}
+                      </div>
+                    ) : (
+                      item.locations || 'Global scope'
+                    )}
                   </td>
                 </tr>
               );
